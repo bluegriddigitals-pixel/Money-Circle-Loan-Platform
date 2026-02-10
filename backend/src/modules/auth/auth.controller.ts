@@ -1,4 +1,4 @@
-﻿import {
+import {
   Controller,
   Post,
   Body,
@@ -72,3 +72,4 @@ export class AuthController {
     return req.user;
   }
 }
+

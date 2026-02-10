@@ -1,6 +1,6 @@
-import { AuthService } from './auth.service';
-import { RegisterDto } from './dto/register.dto';
-import { LoginDto } from './dto/login.dto';
+import { AuthService } from "./auth.service";
+import { RegisterDto } from "./dto/register.dto";
+import { LoginDto } from "./dto/login.dto";
 export declare class AuthController {
     private readonly authService;
     constructor(authService: AuthService);
@@ -12,7 +12,7 @@ export declare class AuthController {
         user: import("../user/entities/user.entity").User;
         tokens: any;
     }>;
-    refresh(refreshToken: string): Promise<{
+    refresh(_refreshToken: string): Promise<{
         message: string;
     }>;
     getProfile(req: any): Promise<any>;

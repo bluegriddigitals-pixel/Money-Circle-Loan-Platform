@@ -29,8 +29,8 @@ let AuthController = class AuthController {
     async login(loginDto) {
         return this.authService.login(loginDto);
     }
-    async refresh(refreshToken) {
-        return { message: 'Refresh endpoint' };
+    async refresh(_refreshToken) {
+        return { message: "Refresh endpoint" };
     }
     async getProfile(req) {
         return req.user;
@@ -38,63 +38,63 @@ let AuthController = class AuthController {
 };
 exports.AuthController = AuthController;
 __decorate([
-    (0, common_1.Post)('register'),
+    (0, common_1.Post)("register"),
     (0, common_1.HttpCode)(common_1.HttpStatus.CREATED),
-    (0, swagger_1.ApiOperation)({ summary: 'Register a new user' }),
-    (0, swagger_1.ApiResponse)({ status: 201, description: 'User registered successfully' }),
-    (0, swagger_1.ApiResponse)({ status: 409, description: 'User already exists' }),
-    (0, swagger_1.ApiResponse)({ status: 400, description: 'Invalid input' }),
+    (0, swagger_1.ApiOperation)({ summary: "Register a new user" }),
+    (0, swagger_1.ApiResponse)({ status: 201, description: "User registered successfully" }),
+    (0, swagger_1.ApiResponse)({ status: 409, description: "User already exists" }),
+    (0, swagger_1.ApiResponse)({ status: 400, description: "Invalid input" }),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [register_dto_1.RegisterDto]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "register", null);
 __decorate([
-    (0, common_1.Post)('login'),
+    (0, common_1.Post)("login"),
     (0, common_1.HttpCode)(common_1.HttpStatus.OK),
-    (0, swagger_1.ApiOperation)({ summary: 'Login user' }),
-    (0, swagger_1.ApiResponse)({ status: 200, description: 'Login successful' }),
-    (0, swagger_1.ApiResponse)({ status: 401, description: 'Invalid credentials' }),
-    (0, swagger_1.ApiResponse)({ status: 403, description: 'Account locked or inactive' }),
+    (0, swagger_1.ApiOperation)({ summary: "Login user" }),
+    (0, swagger_1.ApiResponse)({ status: 200, description: "Login successful" }),
+    (0, swagger_1.ApiResponse)({ status: 401, description: "Invalid credentials" }),
+    (0, swagger_1.ApiResponse)({ status: 403, description: "Account locked or inactive" }),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [login_dto_1.LoginDto]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "login", null);
 __decorate([
-    (0, common_1.Post)('refresh'),
+    (0, common_1.Post)("refresh"),
     (0, common_1.HttpCode)(common_1.HttpStatus.OK),
-    (0, swagger_1.ApiOperation)({ summary: 'Refresh access token' }),
-    (0, swagger_1.ApiResponse)({ status: 200, description: 'Token refreshed successfully' }),
-    (0, swagger_1.ApiResponse)({ status: 401, description: 'Invalid refresh token' }),
+    (0, swagger_1.ApiOperation)({ summary: "Refresh access token" }),
+    (0, swagger_1.ApiResponse)({ status: 200, description: "Token refreshed successfully" }),
+    (0, swagger_1.ApiResponse)({ status: 401, description: "Invalid refresh token" }),
     (0, swagger_1.ApiBody)({
         schema: {
-            type: 'object',
+            type: "object",
             properties: {
-                refreshToken: { type: 'string' },
+                refreshToken: { type: "string" },
             },
         },
     }),
-    __param(0, (0, common_1.Body)('refreshToken')),
+    __param(0, (0, common_1.Body)("refreshToken")),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "refresh", null);
 __decorate([
-    (0, common_1.Get)('me'),
+    (0, common_1.Get)("me"),
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, swagger_1.ApiBearerAuth)(),
-    (0, swagger_1.ApiOperation)({ summary: 'Get current user profile' }),
-    (0, swagger_1.ApiResponse)({ status: 200, description: 'User profile retrieved' }),
-    (0, swagger_1.ApiResponse)({ status: 401, description: 'Unauthorized' }),
+    (0, swagger_1.ApiOperation)({ summary: "Get current user profile" }),
+    (0, swagger_1.ApiResponse)({ status: 200, description: "User profile retrieved" }),
+    (0, swagger_1.ApiResponse)({ status: 401, description: "Unauthorized" }),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "getProfile", null);
 exports.AuthController = AuthController = __decorate([
-    (0, swagger_1.ApiTags)('auth'),
-    (0, common_1.Controller)('auth'),
+    (0, swagger_1.ApiTags)("auth"),
+    (0, common_1.Controller)("auth"),
     __metadata("design:paramtypes", [auth_service_1.AuthService])
 ], AuthController);
 //# sourceMappingURL=auth.controller.js.map

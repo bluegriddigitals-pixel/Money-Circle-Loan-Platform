@@ -1,4 +1,4 @@
-import { UserProfile } from './user-profile.entity';
+import { UserProfile } from "./user-profile.entity";
 export declare enum UserRole {
     BORROWER = "borrower",
     LENDER = "lender",
@@ -38,6 +38,10 @@ export declare class User {
     province: string;
     postalCode: string;
     country: string;
+    bankName: string;
+    bankAccountNumber: string;
+    bankAccountType: string;
+    branchCode: string;
     isEmailVerified: boolean;
     isPhoneVerified: boolean;
     is2faEnabled: boolean;

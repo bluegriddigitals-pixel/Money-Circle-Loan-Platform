@@ -1,4 +1,4 @@
-import { User } from './user.entity';
+import { User } from "./user.entity";
 export declare enum RiskLevel {
     LOW = "low",
     MEDIUM = "medium",
@@ -27,6 +27,7 @@ export declare class UserProfile {
     investmentPreferences: Record<string, any>;
     language: string;
     currency: string;
+    metadata: Record<string, any>;
     createdAt: Date;
     updatedAt: Date;
 }

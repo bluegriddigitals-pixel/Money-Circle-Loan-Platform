@@ -49,7 +49,7 @@ let User = class User {
 };
 exports.User = User;
 __decorate([
-    (0, typeorm_1.PrimaryGeneratedColumn)('uuid'),
+    (0, typeorm_1.PrimaryGeneratedColumn)("uuid"),
     __metadata("design:type", String)
 ], User.prototype, "id", void 0);
 __decorate([
@@ -76,7 +76,7 @@ __decorate([
     __metadata("design:type", String)
 ], User.prototype, "lastName", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'date', nullable: true }),
+    (0, typeorm_1.Column)({ type: "date", nullable: true }),
     __metadata("design:type", Date)
 ], User.prototype, "dateOfBirth", void 0);
 __decorate([
@@ -89,7 +89,7 @@ __decorate([
 ], User.prototype, "taxNumber", void 0);
 __decorate([
     (0, typeorm_1.Column)({
-        type: 'enum',
+        type: "enum",
         enum: UserRole,
         default: UserRole.BORROWER,
     }),
@@ -97,7 +97,7 @@ __decorate([
 ], User.prototype, "role", void 0);
 __decorate([
     (0, typeorm_1.Column)({
-        type: 'enum',
+        type: "enum",
         enum: AccountStatus,
         default: AccountStatus.PENDING,
     }),
@@ -105,7 +105,7 @@ __decorate([
 ], User.prototype, "status", void 0);
 __decorate([
     (0, typeorm_1.Column)({
-        type: 'enum',
+        type: "enum",
         enum: KycStatus,
         default: KycStatus.NOT_STARTED,
     }),
@@ -132,9 +132,25 @@ __decorate([
     __metadata("design:type", String)
 ], User.prototype, "postalCode", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ default: 'South Africa' }),
+    (0, typeorm_1.Column)({ default: "South Africa" }),
     __metadata("design:type", String)
 ], User.prototype, "country", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ nullable: true }),
+    __metadata("design:type", String)
+], User.prototype, "bankName", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ nullable: true }),
+    __metadata("design:type", String)
+], User.prototype, "bankAccountNumber", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ nullable: true }),
+    __metadata("design:type", String)
+], User.prototype, "bankAccountType", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ nullable: true }),
+    __metadata("design:type", String)
+], User.prototype, "branchCode", void 0);
 __decorate([
     (0, typeorm_1.Column)({ default: false }),
     __metadata("design:type", Boolean)
@@ -148,7 +164,7 @@ __decorate([
     __metadata("design:type", Boolean)
 ], User.prototype, "is2faEnabled", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'timestamp', nullable: true }),
+    (0, typeorm_1.Column)({ type: "timestamp", nullable: true }),
     __metadata("design:type", Date)
 ], User.prototype, "lastLogin", void 0);
 __decorate([
@@ -156,7 +172,7 @@ __decorate([
     __metadata("design:type", Number)
 ], User.prototype, "failedLoginAttempts", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'timestamp', nullable: true }),
+    (0, typeorm_1.Column)({ type: "timestamp", nullable: true }),
     __metadata("design:type", Date)
 ], User.prototype, "lockedUntil", void 0);
 __decorate([
@@ -173,10 +189,10 @@ __decorate([
     __metadata("design:type", Date)
 ], User.prototype, "updatedAt", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'timestamp', nullable: true }),
+    (0, typeorm_1.Column)({ type: "timestamp", nullable: true }),
     __metadata("design:type", Date)
 ], User.prototype, "deactivatedAt", void 0);
 exports.User = User = __decorate([
-    (0, typeorm_1.Entity)('users')
+    (0, typeorm_1.Entity)("users")
 ], User);
 //# sourceMappingURL=user.entity.js.map

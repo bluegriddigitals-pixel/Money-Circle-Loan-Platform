@@ -33,44 +33,30 @@ let AuthService = class AuthService {
             where: { email: registerDto.email },
         });
         if (existingUser) {
-            throw new common_1.ConflictException('User with this email already exists');
+            throw new common_1.ConflictException("User with this email already exists");
         }
         const hashedPassword = await bcrypt.hash(registerDto.password, 10);
-        const user = this.usersRepository.create({
-            email: registerDto.email,
-            passwordHash: hashedPassword,
-            firstName: registerDto.firstName,
-            lastName: registerDto.lastName,
-            phoneNumber: registerDto.phoneNumber,
-            dateOfBirth: registerDto.dateOfBirth ? new Date(registerDto.dateOfBirth) : null,
-            role: registerDto.role,
-            status: user_entity_1.AccountStatus.ACTIVE,
-            kycStatus: 'not_started',
-            isEmailVerified: false,
-            isPhoneVerified: false,
-            is2faEnabled: false,
-            country: 'South Africa',
-        });
+        const user = new user_entity_1.User();
+        user.email = registerDto.email;
+        user.passwordHash = hashedPassword;
+        user.firstName = registerDto.firstName;
+        user.lastName = registerDto.lastName;
+        user.phoneNumber = registerDto.phoneNumber;
+        user.dateOfBirth = registerDto.dateOfBirth ? new Date(registerDto.dateOfBirth) : null;
+        user.role = registerDto.role;
+        user.status = user_entity_1.AccountStatus.ACTIVE;
+        user.kycStatus = user_entity_1.KycStatus.NOT_STARTED;
+        user.isEmailVerified = false;
+        user.isPhoneVerified = false;
+        user.is2faEnabled = false;
+        user.country = "South Africa";
         await this.usersRepository.save(user);
-        const profile = this.profilesRepository.create({
-            userId: user.id,
-            employmentStatus: null,
-            employerName: null,
-            jobTitle: null,
-            monthlyIncome: null,
-            yearsEmployed: null,
-            creditScore: 0,
-            totalBorrowed: 0,
-            totalRepaid: 0,
-            totalInvested: 0,
-            totalEarned: 0,
-            outstandingBalance: 0,
-            riskLevel: 'medium',
-            riskScore: 50,
-            language: 'en',
-            currency: 'ZAR',
-            notificationPreferences: { email: true, sms: false, push: true },
-        });
+        const profile = new user_profile_entity_1.UserProfile();
+        profile.userId = user.id;
+        profile.riskLevel = user_profile_entity_1.RiskLevel.MEDIUM;
+        profile.creditScore = 0;
+        profile.language = "en";
+        profile.currency = "ZAR";
         await this.profilesRepository.save(profile);
         const tokens = await this.generateTokens(user);
         return { user, tokens };
@@ -78,17 +64,17 @@ let AuthService = class AuthService {
     async login(loginDto) {
         const user = await this.usersRepository.findOne({
             where: { email: loginDto.email },
-            relations: ['profile'],
+            relations: ["profile"],
         });
         if (!user) {
-            throw new common_1.UnauthorizedException('Invalid credentials');
+            throw new common_1.UnauthorizedException("Invalid credentials");
         }
         if (user.status !== user_entity_1.AccountStatus.ACTIVE) {
             throw new common_1.ForbiddenException(`Account is ${user.status}`);
         }
         const isPasswordValid = await bcrypt.compare(loginDto.password, user.passwordHash);
         if (!isPasswordValid) {
-            throw new common_1.UnauthorizedException('Invalid credentials');
+            throw new common_1.UnauthorizedException("Invalid credentials");
         }
         user.lastLogin = new Date();
         await this.usersRepository.save(user);
@@ -102,25 +88,20 @@ let AuthService = class AuthService {
             role: user.role,
         };
         const accessToken = await this.jwtService.signAsync(payload, {
-            secret: this.configService.get('jwt.secret'),
-            expiresIn: this.configService.get('jwt.accessTokenExpiry'),
-        });
-        const refreshToken = await this.jwtService.signAsync(payload, {
-            secret: this.configService.get('jwt.secret'),
-            expiresIn: this.configService.get('jwt.refreshTokenExpiry'),
+            secret: this.configService.get("jwt.secret"),
+            expiresIn: "1h",
         });
         return {
             accessToken,
-            refreshToken,
         };
     }
     async validateUser(userId) {
         const user = await this.usersRepository.findOne({
             where: { id: userId },
-            relations: ['profile'],
+            relations: ["profile"],
         });
         if (!user || user.status !== user_entity_1.AccountStatus.ACTIVE) {
-            throw new common_1.UnauthorizedException('User not found or inactive');
+            throw new common_1.UnauthorizedException("User not found or inactive");
         }
         return user;
     }

@@ -1,10 +1,10 @@
-import { JwtService } from '@nestjs/jwt';
-import { Repository } from 'typeorm';
-import { ConfigService } from '@nestjs/config';
-import { User } from '../user/entities/user.entity';
-import { UserProfile } from '../user/entities/user-profile.entity';
-import { RegisterDto } from './dto/register.dto';
-import { LoginDto } from './dto/login.dto';
+import { JwtService } from "@nestjs/jwt";
+import { Repository } from "typeorm";
+import { ConfigService } from "@nestjs/config";
+import { User } from "../user/entities/user.entity";
+import { UserProfile } from "../user/entities/user-profile.entity";
+import { RegisterDto } from "./dto/register.dto";
+import { LoginDto } from "./dto/login.dto";
 export declare class AuthService {
     private usersRepository;
     private profilesRepository;
@@ -21,7 +21,6 @@ export declare class AuthService {
     }>;
     generateTokens(user: User): Promise<{
         accessToken: string;
-        refreshToken: string;
     }>;
     validateUser(userId: string): Promise<User>;
 }

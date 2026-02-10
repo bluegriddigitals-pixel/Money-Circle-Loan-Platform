@@ -23,16 +23,16 @@ let UserProfile = class UserProfile {
 };
 exports.UserProfile = UserProfile;
 __decorate([
-    (0, typeorm_1.PrimaryGeneratedColumn)('uuid'),
+    (0, typeorm_1.PrimaryGeneratedColumn)("uuid"),
     __metadata("design:type", String)
 ], UserProfile.prototype, "id", void 0);
 __decorate([
-    (0, typeorm_1.OneToOne)(() => user_entity_1.User, (user) => user.profile, { onDelete: 'CASCADE' }),
-    (0, typeorm_1.JoinColumn)({ name: 'user_id' }),
+    (0, typeorm_1.OneToOne)(() => user_entity_1.User, (user) => user.profile, { onDelete: "CASCADE" }),
+    (0, typeorm_1.JoinColumn)({ name: "user_id" }),
     __metadata("design:type", user_entity_1.User)
 ], UserProfile.prototype, "user", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ name: 'user_id', unique: true }),
+    (0, typeorm_1.Column)({ name: "user_id", unique: true }),
     __metadata("design:type", String)
 ], UserProfile.prototype, "userId", void 0);
 __decorate([
@@ -48,11 +48,11 @@ __decorate([
     __metadata("design:type", String)
 ], UserProfile.prototype, "jobTitle", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'decimal', precision: 15, scale: 2, nullable: true }),
+    (0, typeorm_1.Column)({ type: "decimal", precision: 15, scale: 2, nullable: true }),
     __metadata("design:type", Number)
 ], UserProfile.prototype, "monthlyIncome", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'decimal', precision: 5, scale: 2, nullable: true }),
+    (0, typeorm_1.Column)({ type: "decimal", precision: 5, scale: 2, nullable: true }),
     __metadata("design:type", Number)
 ], UserProfile.prototype, "yearsEmployed", void 0);
 __decorate([
@@ -60,28 +60,28 @@ __decorate([
     __metadata("design:type", Number)
 ], UserProfile.prototype, "creditScore", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'decimal', precision: 15, scale: 2, default: 0 }),
+    (0, typeorm_1.Column)({ type: "decimal", precision: 15, scale: 2, default: 0 }),
     __metadata("design:type", Number)
 ], UserProfile.prototype, "totalBorrowed", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'decimal', precision: 15, scale: 2, default: 0 }),
+    (0, typeorm_1.Column)({ type: "decimal", precision: 15, scale: 2, default: 0 }),
     __metadata("design:type", Number)
 ], UserProfile.prototype, "totalRepaid", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'decimal', precision: 15, scale: 2, default: 0 }),
+    (0, typeorm_1.Column)({ type: "decimal", precision: 15, scale: 2, default: 0 }),
     __metadata("design:type", Number)
 ], UserProfile.prototype, "totalInvested", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'decimal', precision: 15, scale: 2, default: 0 }),
+    (0, typeorm_1.Column)({ type: "decimal", precision: 15, scale: 2, default: 0 }),
     __metadata("design:type", Number)
 ], UserProfile.prototype, "totalEarned", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'decimal', precision: 15, scale: 2, default: 0 }),
+    (0, typeorm_1.Column)({ type: "decimal", precision: 15, scale: 2, default: 0 }),
     __metadata("design:type", Number)
 ], UserProfile.prototype, "outstandingBalance", void 0);
 __decorate([
     (0, typeorm_1.Column)({
-        type: 'enum',
+        type: "enum",
         enum: RiskLevel,
         default: RiskLevel.MEDIUM,
     }),
@@ -92,25 +92,29 @@ __decorate([
     __metadata("design:type", Number)
 ], UserProfile.prototype, "riskScore", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'timestamp', nullable: true }),
+    (0, typeorm_1.Column)({ type: "timestamp", nullable: true }),
     __metadata("design:type", Date)
 ], UserProfile.prototype, "lastRiskAssessment", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'jsonb', default: { email: true, sms: false, push: true } }),
+    (0, typeorm_1.Column)({ type: "jsonb", default: { email: true, sms: false, push: true } }),
     __metadata("design:type", Object)
 ], UserProfile.prototype, "notificationPreferences", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ type: 'jsonb', nullable: true }),
+    (0, typeorm_1.Column)({ type: "jsonb", nullable: true }),
     __metadata("design:type", Object)
 ], UserProfile.prototype, "investmentPreferences", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ default: 'en' }),
+    (0, typeorm_1.Column)({ default: "en" }),
     __metadata("design:type", String)
 ], UserProfile.prototype, "language", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ default: 'ZAR' }),
+    (0, typeorm_1.Column)({ default: "ZAR" }),
     __metadata("design:type", String)
 ], UserProfile.prototype, "currency", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: "jsonb", nullable: true }),
+    __metadata("design:type", Object)
+], UserProfile.prototype, "metadata", void 0);
 __decorate([
     (0, typeorm_1.CreateDateColumn)(),
     __metadata("design:type", Date)
@@ -120,6 +124,6 @@ __decorate([
     __metadata("design:type", Date)
 ], UserProfile.prototype, "updatedAt", void 0);
 exports.UserProfile = UserProfile = __decorate([
-    (0, typeorm_1.Entity)('user_profiles')
+    (0, typeorm_1.Entity)("user_profiles")
 ], UserProfile);
 //# sourceMappingURL=user-profile.entity.js.map

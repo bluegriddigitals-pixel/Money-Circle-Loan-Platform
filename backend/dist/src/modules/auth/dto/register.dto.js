@@ -17,48 +17,39 @@ class RegisterDto {
 }
 exports.RegisterDto = RegisterDto;
 __decorate([
-    (0, swagger_1.ApiProperty)({ example: 'john.doe@example.com' }),
+    (0, swagger_1.ApiProperty)(),
     (0, class_validator_1.IsEmail)(),
     __metadata("design:type", String)
 ], RegisterDto.prototype, "email", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)({ example: 'Password123!' }),
+    (0, swagger_1.ApiProperty)(),
     (0, class_validator_1.IsString)(),
-    (0, class_validator_1.MinLength)(8),
-    (0, class_validator_1.MaxLength)(100),
-    (0, class_validator_1.Matches)(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/, {
-        message: 'Password must contain at least one uppercase letter, one lowercase letter, one number and one special character',
-    }),
     __metadata("design:type", String)
 ], RegisterDto.prototype, "password", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)({ example: 'John' }),
+    (0, swagger_1.ApiProperty)(),
     (0, class_validator_1.IsString)(),
-    (0, class_validator_1.MinLength)(2),
-    (0, class_validator_1.MaxLength)(100),
     __metadata("design:type", String)
 ], RegisterDto.prototype, "firstName", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)({ example: 'Doe' }),
+    (0, swagger_1.ApiProperty)(),
     (0, class_validator_1.IsString)(),
-    (0, class_validator_1.MinLength)(2),
-    (0, class_validator_1.MaxLength)(100),
     __metadata("design:type", String)
 ], RegisterDto.prototype, "lastName", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)({ example: '+27821234567', required: false }),
+    (0, swagger_1.ApiProperty)({ required: false }),
     (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsPhoneNumber)('ZA'),
+    (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], RegisterDto.prototype, "phoneNumber", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)({ example: '1990-01-01', required: false }),
+    (0, swagger_1.ApiProperty)({ required: false }),
     (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsDateString)(),
+    (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], RegisterDto.prototype, "dateOfBirth", void 0);
 __decorate([
-    (0, swagger_1.ApiProperty)({ enum: user_entity_1.UserRole, example: user_entity_1.UserRole.BORROWER }),
+    (0, swagger_1.ApiProperty)({ enum: user_entity_1.UserRole }),
     (0, class_validator_1.IsEnum)(user_entity_1.UserRole),
     __metadata("design:type", String)
 ], RegisterDto.prototype, "role", void 0);
