@@ -11,8 +11,6 @@ import {
 } from 'typeorm';
 import { Exclude } from 'class-transformer';
 import { UserProfile } from './user-profile.entity';
-import { LoanApplication } from '../../loan/entities/loan-application.entity';
-import { Wallet } from '../../payment/entities/wallet.entity';
 
 export enum UserRole {
   BORROWER = 'borrower',
@@ -109,19 +107,6 @@ export class User {
   @Column({ default: 'South Africa' })
   country: string;
 
-  // Banking Details (should be encrypted in production)
-  @Column({ nullable: true })
-  bankName: string;
-
-  @Column({ nullable: true })
-  bankAccountNumber: string;
-
-  @Column({ nullable: true })
-  bankAccountType: string;
-
-  @Column({ nullable: true })
-  branchCode: string;
-
   // Security
   @Column({ default: false })
   isEmailVerified: boolean;
@@ -146,12 +131,6 @@ export class User {
   @JoinColumn()
   profile: UserProfile;
 
-  @OneToOne(() => Wallet, (wallet) => wallet.user, { cascade: true })
-  wallet: Wallet;
-
-  @OneToMany(() => LoanApplication, (application) => application.user)
-  loanApplications: LoanApplication[];
-
   // Timestamps
   @CreateDateColumn()
   createdAt: Date;
@@ -173,21 +152,5 @@ export class User {
 
   isKycVerified(): boolean {
     return this.kycStatus === KycStatus.VERIFIED;
-  }
-
-  canApplyForLoan(): boolean {
-    return (
-      this.isActive() &&
-      this.isKycVerified() &&
-      this.role === UserRole.BORROWER
-    );
-  }
-
-  canInvest(): boolean {
-    return (
-      this.isActive() &&
-      this.isKycVerified() &&
-      this.role === UserRole.LENDER
-    );
   }
 }

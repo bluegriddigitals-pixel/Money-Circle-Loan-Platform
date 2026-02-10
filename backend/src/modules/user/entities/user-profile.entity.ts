@@ -90,10 +90,6 @@ export class UserProfile {
   @Column({ default: 'ZAR' })
   currency: string;
 
-  // Metadata
-  @Column({ type: 'jsonb', nullable: true })
-  metadata: Record<string, any>;
-
   @CreateDateColumn()
   createdAt: Date;
 

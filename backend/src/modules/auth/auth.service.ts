@@ -2,19 +2,17 @@ import {
   Injectable,
   ConflictException,
   UnauthorizedException,
-  BadRequestException,
   ForbiddenException,
-} from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import * as bcrypt from 'bcrypt';
-import { ConfigService } from '@nestjs/config';
-import { User, AccountStatus } from '../user/entities/user.entity';
-import { UserProfile } from '../user/entities/user-profile.entity';
-import { Wallet } from '../payment/entities/wallet.entity';
-import { RegisterDto } from './dto/register.dto';
-import { LoginDto } from './dto/login.dto';
+} from "@nestjs/common";
+import { JwtService } from "@nestjs/jwt";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import * as bcrypt from "bcrypt";
+import { ConfigService } from "@nestjs/config";
+import { User, AccountStatus, UserRole, KycStatus } from "../user/entities/user.entity";
+import { UserProfile, RiskLevel } from "../user/entities/user-profile.entity";
+import { RegisterDto } from "./dto/register.dto";
+import { LoginDto } from "./dto/login.dto";
 
 @Injectable()
 export class AuthService {
@@ -23,8 +21,6 @@ export class AuthService {
     private usersRepository: Repository<User>,
     @InjectRepository(UserProfile)
     private profilesRepository: Repository<UserProfile>,
-    @InjectRepository(Wallet)
-    private walletsRepository: Repository<Wallet>,
     private jwtService: JwtService,
     private configService: ConfigService,
   ) {}
@@ -32,49 +28,58 @@ export class AuthService {
   async register(registerDto: RegisterDto): Promise<{ user: User; tokens: any }> {
     // Check if user already exists
     const existingUser = await this.usersRepository.findOne({
-      where: [{ email: registerDto.email }, { phoneNumber: registerDto.phoneNumber }],
+      where: { email: registerDto.email },
     });
 
     if (existingUser) {
-      throw new ConflictException('User with this email or phone number already exists');
+      throw new ConflictException("User with this email already exists");
     }
 
     // Hash password
     const hashedPassword = await bcrypt.hash(registerDto.password, 10);
 
-    // Create user
-    const user = this.usersRepository.create({
-      ...registerDto,
-      passwordHash: hashedPassword,
-      status: AccountStatus.PENDING,
-    });
+    // Create user using save() instead of create() to avoid type issues
+    const user = new User();
+    user.email = registerDto.email;
+    user.passwordHash = hashedPassword;
+    user.firstName = registerDto.firstName;
+    user.lastName = registerDto.lastName;
+    user.phoneNumber = registerDto.phoneNumber;
+    user.dateOfBirth = registerDto.dateOfBirth ? new Date(registerDto.dateOfBirth) : null;
+    user.role = registerDto.role;
+    user.status = AccountStatus.ACTIVE;
+    user.kycStatus = KycStatus.NOT_STARTED;
+    user.isEmailVerified = false;
+    user.isPhoneVerified = false;
+    user.is2faEnabled = false;
+    user.country = "South Africa";
+
+    await this.usersRepository.save(user);
 
     // Create user profile
-    const profile = this.profilesRepository.create({
-      user,
-    });
+    const profile = new UserProfile();
+    profile.userId = user.id;
+    profile.employmentStatus = null;
+    profile.employerName = null;
+    profile.jobTitle = null;
+    profile.monthlyIncome = null;
+    profile.yearsEmployed = null;
+    profile.creditScore = 0;
+    profile.totalBorrowed = 0;
+    profile.totalRepaid = 0;
+    profile.totalInvested = 0;
+    profile.totalEarned = 0;
+    profile.outstandingBalance = 0;
+    profile.riskLevel = RiskLevel.MEDIUM;
+    profile.riskScore = 50;
+    profile.language = "en";
+    profile.currency = "ZAR";
+    profile.notificationPreferences = { email: true, sms: false, push: true };
 
-    // Create wallet
-    const wallet = this.walletsRepository.create({
-      user,
-      availableBalance: 0,
-      lockedBalance: 0,
-    });
-
-    // Save all in transaction
-    await this.usersRepository.manager.transaction(async (transactionalEntityManager) => {
-      await transactionalEntityManager.save(user);
-      profile.userId = user.id;
-      await transactionalEntityManager.save(profile);
-      await transactionalEntityManager.save(wallet);
-    });
+    await this.profilesRepository.save(profile);
 
     // Generate tokens
     const tokens = await this.generateTokens(user);
-
-    // Update last login
-    user.lastLogin = new Date();
-    await this.usersRepository.save(user);
 
     return { user, tokens };
   }
@@ -83,42 +88,26 @@ export class AuthService {
     // Find user
     const user = await this.usersRepository.findOne({
       where: { email: loginDto.email },
-      relations: ['profile', 'wallet'],
+      relations: ["profile"],
     });
 
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException("Invalid credentials");
     }
 
     // Check account status
-    if (user.status !== AccountStatus.ACTIVE && user.status !== AccountStatus.PENDING) {
+    if (user.status !== AccountStatus.ACTIVE) {
       throw new ForbiddenException(`Account is ${user.status}`);
-    }
-
-    // Check if account is locked
-    if (user.lockedUntil && user.lockedUntil > new Date()) {
-      throw new ForbiddenException('Account is temporarily locked. Please try again later.');
     }
 
     // Verify password
     const isPasswordValid = await bcrypt.compare(loginDto.password, user.passwordHash);
 
     if (!isPasswordValid) {
-      // Increment failed login attempts
-      user.failedLoginAttempts += 1;
-      
-      // Lock account after 5 failed attempts
-      if (user.failedLoginAttempts >= 5) {
-        user.lockedUntil = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
-      }
-      
-      await this.usersRepository.save(user);
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException("Invalid credentials");
     }
 
-    // Reset failed login attempts
-    user.failedLoginAttempts = 0;
-    user.lockedUntil = null;
+    // Update last login
     user.lastLogin = new Date();
     await this.usersRepository.save(user);
 
@@ -136,13 +125,13 @@ export class AuthService {
     };
 
     const accessToken = await this.jwtService.signAsync(payload, {
-      secret: this.configService.get('jwt.secret'),
-      expiresIn: this.configService.get('jwt.accessTokenExpiry'),
+      secret: this.configService.get("jwt.secret"),
+      expiresIn: this.configService.get("jwt.accessTokenExpiry"),
     });
 
     const refreshToken = await this.jwtService.signAsync(payload, {
-      secret: this.configService.get('jwt.secret'),
-      expiresIn: this.configService.get('jwt.refreshTokenExpiry'),
+      secret: this.configService.get("jwt.secret"),
+      expiresIn: this.configService.get("jwt.refreshTokenExpiry"),
     });
 
     return {
@@ -151,40 +140,14 @@ export class AuthService {
     };
   }
 
-  async refreshTokens(refreshToken: string) {
-    try {
-      const payload = await this.jwtService.verifyAsync(refreshToken, {
-        secret: this.configService.get('jwt.secret'),
-      });
-
-      const user = await this.usersRepository.findOne({
-        where: { id: payload.sub },
-      });
-
-      if (!user) {
-        throw new UnauthorizedException('User not found');
-      }
-
-      return this.generateTokens(user);
-    } catch (error) {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
-  }
-
-  async logout(userId: string) {
-    // In a real application, you would invalidate the refresh token
-    // This could be done by storing it in a Redis blacklist
-    return { message: 'Logged out successfully' };
-  }
-
   async validateUser(userId: string): Promise<User> {
     const user = await this.usersRepository.findOne({
       where: { id: userId },
-      relations: ['profile', 'wallet'],
+      relations: ["profile"],
     });
 
     if (!user || user.status !== AccountStatus.ACTIVE) {
-      throw new UnauthorizedException('User not found or inactive');
+      throw new UnauthorizedException("User not found or inactive");
     }
 
     return user;

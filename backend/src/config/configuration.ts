@@ -12,9 +12,7 @@ export default () => ({
     password: process.env.DB_PASSWORD || 'postgres',
     database: process.env.DB_DATABASE || 'moneycircle',
     synchronize: process.env.NODE_ENV !== 'production',
-    migrationsRun: process.env.NODE_ENV === 'production',
     logging: process.env.NODE_ENV === 'development',
-    ssl: process.env.DB_SSL === 'true',
   },
   
   // JWT
@@ -33,34 +31,6 @@ export default () => ({
   // Rate limiting
   throttler: {
     ttl: parseInt(process.env.THROTTLE_TTL, 10) || 60,
-    limit: parseInt(process.env.THROTTLE_LIMIT, 10) || 10,
-  },
-  
-  // Payment Gateway
-  paystack: {
-    secretKey: process.env.PAYSTACK_SECRET_KEY || '',
-    publicKey: process.env.PAYSTACK_PUBLIC_KEY || '',
-  },
-  
-  // Email
-  email: {
-    host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.EMAIL_PORT, 10) || 587,
-    user: process.env.EMAIL_USER || '',
-    password: process.env.EMAIL_PASSWORD || '',
-    from: process.env.EMAIL_FROM || 'noreply@moneycircle.co.za',
-  },
-  
-  // SMS
-  sms: {
-    twilioAccountSid: process.env.TWILIO_ACCOUNT_SID || '',
-    twilioAuthToken: process.env.TWILIO_AUTH_TOKEN || '',
-    twilioPhoneNumber: process.env.TWILIO_PHONE_NUMBER || '',
-  },
-  
-  // File Upload
-  upload: {
-    maxFileSize: parseInt(process.env.MAX_FILE_SIZE, 10) || 10 * 1024 * 1024, // 10MB
-    allowedMimeTypes: ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'],
+    limit: parseInt(process.env.THROTTLE_LIMIT, 10) || 100,
   },
 });

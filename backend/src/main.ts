@@ -35,8 +35,6 @@ async function bootstrap() {
     .addTag('auth', 'Authentication endpoints')
     .addTag('users', 'User management')
     .addTag('loans', 'Loan operations')
-    .addTag('marketplace', 'Loan marketplace')
-    .addTag('payments', 'Payment processing')
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
