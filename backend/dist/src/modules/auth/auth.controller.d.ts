@@ -12,7 +12,7 @@ export declare class AuthController {
         user: import("../user/entities/user.entity").User;
         tokens: any;
     }>;
-    refresh(refreshToken: string): Promise<{
+    refresh(_refreshToken: string): Promise<{
         message: string;
         accessToken: string;
     }>;

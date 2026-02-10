@@ -105,9 +105,6 @@ let AuthService = class AuthService {
         }
         return user;
     }
-    async refresh(refreshToken) {
-        throw new Error("Refresh method not implemented");
-    }
 };
 exports.AuthService = AuthService;
 exports.AuthService = AuthService = __decorate([

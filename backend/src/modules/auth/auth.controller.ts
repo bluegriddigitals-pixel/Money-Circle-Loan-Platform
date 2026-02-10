@@ -58,11 +58,11 @@ export class AuthController {
       },
     },
   })
-  async refresh(@Body("refreshToken") refreshToken: string) {
+  async refresh() {
     // TODO: Implement refresh token logic
-    return { 
+    return {
       message: "Refresh endpoint - Implementation pending",
-      accessToken: "dummy-token-placeholder" 
+      accessToken: "dummy-token-placeholder"
     };
   }
 
