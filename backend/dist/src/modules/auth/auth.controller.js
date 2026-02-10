@@ -29,8 +29,11 @@ let AuthController = class AuthController {
     async login(loginDto) {
         return this.authService.login(loginDto);
     }
-    async refresh(_refreshToken) {
-        return { message: "Refresh endpoint" };
+    async refresh(refreshToken) {
+        return {
+            message: "Refresh endpoint - Implementation pending",
+            accessToken: "dummy-token-placeholder"
+        };
     }
     async getProfile(req) {
         return req.user;

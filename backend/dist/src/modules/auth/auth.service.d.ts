@@ -23,4 +23,5 @@ export declare class AuthService {
         accessToken: string;
     }>;
     validateUser(userId: string): Promise<User>;
+    refresh(refreshToken: string): Promise<void>;
 }

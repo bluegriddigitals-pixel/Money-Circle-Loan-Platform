@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Post,
   Body,
@@ -58,8 +58,12 @@ export class AuthController {
       },
     },
   })
-  async refresh(@Body("refreshToken") _refreshToken: string) {
-    return { message: "Refresh endpoint" };
+  async refresh(@Body("refreshToken") refreshToken: string) {
+    // TODO: Implement refresh token logic
+    return { 
+      message: "Refresh endpoint - Implementation pending",
+      accessToken: "dummy-token-placeholder" 
+    };
   }
 
   @Get("me")
@@ -72,4 +76,3 @@ export class AuthController {
     return req.user;
   }
 }
-

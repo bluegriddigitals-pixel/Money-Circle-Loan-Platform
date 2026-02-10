@@ -124,4 +124,8 @@ export class AuthService {
 
     return user;
   }
+  async refresh(refreshToken: string) {
+    // TODO: Implement refresh token validation and new access token generation
+    throw new Error("Refresh method not implemented");
+  }
 }

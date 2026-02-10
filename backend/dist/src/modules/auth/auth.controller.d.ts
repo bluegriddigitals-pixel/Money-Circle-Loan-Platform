@@ -12,8 +12,9 @@ export declare class AuthController {
         user: import("../user/entities/user.entity").User;
         tokens: any;
     }>;
-    refresh(_refreshToken: string): Promise<{
+    refresh(refreshToken: string): Promise<{
         message: string;
+        accessToken: string;
     }>;
     getProfile(req: any): Promise<any>;
 }
