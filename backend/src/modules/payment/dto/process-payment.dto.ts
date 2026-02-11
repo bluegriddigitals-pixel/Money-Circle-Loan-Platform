@@ -2,15 +2,12 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsString,
   IsNumber,
-  IsEnum,
   IsOptional,
   IsUUID,
-  IsNotEmpty,
   Min,
   MaxLength,
   IsBoolean,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 
 export class ProcessPaymentDto {
   @ApiProperty({

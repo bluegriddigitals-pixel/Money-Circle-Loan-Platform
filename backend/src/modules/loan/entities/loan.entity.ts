@@ -36,6 +36,7 @@ import {
   IsObject,
   IsArray,
   MaxLength,
+  MinLength,
 } from 'class-validator';
 import { DecimalColumn } from '../../../shared/decorators/decimal-column.decorator';
 import { User } from '../../user/entities/user.entity';
@@ -44,6 +45,9 @@ import { LoanCollateral } from './loan-collateral.entity';
 import { LoanDocument } from './loan-document.entity';
 import { LoanGuarantor } from './loan-guarantor.entity';
 import { LoanRepayment } from './loan-repayment.entity';
+import { Disbursement } from '../../payment/entities/disbursement.entity';
+import { EscrowAccount } from '../../payment/entities/escrow-account.entity';
+import { Investment } from '../../marketplace/entities/investment.entity';
 
 export enum LoanStatus {
   DRAFT = 'draft',
@@ -558,6 +562,19 @@ export class Loan {
   version: number;
 
   // Relations
+  // ============ MARKETPLACE RELATIONS ============
+  @ApiPropertyOptional({
+    description: 'Investments in this loan',
+    type: () => [Investment],
+  })
+  @OneToMany(() => Investment, (investment) => investment.loan, {
+    cascade: true,
+    eager: false,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => Investment)
+  investments: Investment[];
+
   @ApiPropertyOptional({
     description: 'Borrower user',
     type: () => User,
@@ -631,6 +648,30 @@ export class Loan {
   @ValidateNested({ each: true })
   @Type(() => LoanRepayment)
   repayments: LoanRepayment[];
+
+  @ApiPropertyOptional({
+    description: 'Disbursements for this loan',
+    type: () => [Disbursement],
+  })
+  @OneToMany(() => Disbursement, (disbursement) => disbursement.loan, {
+    cascade: true,
+    eager: false,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => Disbursement)
+  disbursements: Disbursement[];
+
+  @ApiPropertyOptional({
+    description: 'Escrow accounts for this loan',
+    type: () => [EscrowAccount],
+  })
+  @OneToMany(() => EscrowAccount, (escrow) => escrow.loan, {
+    cascade: true,
+    eager: false,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => EscrowAccount)
+  escrowAccounts: EscrowAccount[];
 
   // Lifecycle hooks
   @BeforeInsert()
@@ -708,7 +749,7 @@ export class Loan {
   @Expose()
   get remainingMonths(): number | null {
     if (!this.tenureMonths || !this.createdAt) return null;
-    
+
     const startDate = this.disbursementDate || this.createdAt;
     const elapsedMonths = this.getMonthDifference(new Date(), startDate);
     return Math.max(0, this.tenureMonths - elapsedMonths);
@@ -824,13 +865,11 @@ export class Loan {
     }
     this.status = LoanStatus.FUNDING;
     this.disbursementDate = disbursementDate;
-    
-    // Set first repayment date (30 days after disbursement)
+
     const firstRepayment = new Date(disbursementDate);
     firstRepayment.setDate(firstRepayment.getDate() + 30);
     this.firstRepaymentDate = firstRepayment;
-    
-    // Set last repayment date (tenure months after first repayment)
+
     const lastRepayment = new Date(firstRepayment);
     lastRepayment.setMonth(lastRepayment.getMonth() + this.tenureMonths - 1);
     this.lastRepaymentDate = lastRepayment;
@@ -863,7 +902,7 @@ export class Loan {
     if (this.status !== LoanStatus.ACTIVE && this.status !== LoanStatus.DEFAULTED) {
       throw new Error('Only active or defaulted loans can be restructured');
     }
-    
+
     this.amount = newAmount;
     this.tenureMonths = newTenure;
     this.interestRate = newRate;
@@ -876,7 +915,7 @@ export class Loan {
     if (amount <= 0) {
       throw new Error('Payment amount must be positive');
     }
-    
+
     this.amountPaid += amount;
     this.calculateOutstandingBalance();
   }
@@ -897,10 +936,10 @@ export class Loan {
   private updateCollateralMetrics(): void {
     if (this.collaterals && this.collaterals.length > 0) {
       this.totalCollateralValue = this.collaterals.reduce(
-        (sum, collateral) => sum + (collateral.appraisedValue || 0), 
+        (sum, collateral) => sum + (collateral.appraisedValue || 0),
         0
       );
-      
+
       if (this.totalCollateralValue > 0) {
         this.collateralCoverageRatio = this.amount / this.totalCollateralValue;
         this.loanToValueRatio = (this.amount / this.totalCollateralValue) * 100;
@@ -920,12 +959,12 @@ export class Loan {
     nextPaymentDate?: Date;
   } {
     let nextPaymentDate: Date | undefined;
-    
+
     if (this.repayments) {
       const nextPayment = this.repayments
         .filter(r => r.status === 'pending')
         .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())[0];
-      
+
       if (nextPayment) {
         nextPaymentDate = nextPayment.dueDate;
       }

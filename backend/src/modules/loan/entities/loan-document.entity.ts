@@ -13,7 +13,7 @@ import {
   AfterInsert,
   AfterUpdate,
 } from 'typeorm';
-import { Exclude, Expose, Transform, Type } from 'class-transformer';
+import { Exclude, Expose, Type } from 'class-transformer';
 import {
   ApiProperty,
   ApiPropertyOptional,
@@ -33,10 +33,16 @@ import {
   MinLength,
   IsObject,
   ValidateNested,
+  IsArray,
+  IsInt,
+  Min,
+  Max,
 } from 'class-validator';
-import { v4 as uuidv4 } from 'uuid';
+import { DecimalColumn } from '../../../shared/decorators/decimal-column.decorator';
 import { Loan } from './loan.entity';
 import { LoanApplication } from './loan-application.entity';
+import { LoanGuarantor } from './loan-guarantor.entity';
+import { LoanCollateral } from './loan-collateral.entity';
 
 export enum DocumentType {
   IDENTITY_PROOF = 'identity_proof',
@@ -84,6 +90,8 @@ export enum VerificationMethod {
 @Entity('loan_documents')
 @Index(['loanId'])
 @Index(['loanApplicationId'])
+@Index(['guarantorId'])
+@Index(['collateralId'])
 @Index(['documentType'])
 @Index(['status'])
 @Index(['uploadedById'])
@@ -126,6 +134,24 @@ export class LoanDocument {
   @IsOptional()
   @IsUUID('4')
   loanApplicationId: string;
+
+  @ApiPropertyOptional({
+    description: 'ID of the guarantor (if associated with a guarantor)',
+    example: '123e4567-e89b-12d3-a456-426614174003',
+  })
+  @Column({ type: 'uuid', nullable: true })
+  @IsOptional()
+  @IsUUID('4')
+  guarantorId: string;
+
+  @ApiPropertyOptional({
+    description: 'ID of the collateral (if associated with collateral)',
+    example: '123e4567-e89b-12d3-a456-426614174004',
+  })
+  @Column({ type: 'uuid', nullable: true })
+  @IsOptional()
+  @IsUUID('4')
+  collateralId: string;
 
   @ApiProperty({
     description: 'Document type',
@@ -471,7 +497,7 @@ export class LoanDocument {
 
   @ApiPropertyOptional({
     description: 'ID of user who uploaded the document',
-    example: '123e4567-e89b-12d3-a456-426614174003',
+    example: '123e4567-e89b-12d3-a456-426614174005',
   })
   @Column({ type: 'uuid', nullable: true })
   @IsOptional()
@@ -489,7 +515,7 @@ export class LoanDocument {
 
   @ApiPropertyOptional({
     description: 'ID of user who verified the document',
-    example: '123e4567-e89b-12d3-a456-426614174004',
+    example: '123e4567-e89b-12d3-a456-426614174006',
   })
   @Column({ type: 'uuid', nullable: true })
   @IsOptional()
@@ -543,7 +569,7 @@ export class LoanDocument {
 
   @ApiPropertyOptional({
     description: 'Last viewed by user ID',
-    example: '123e4567-e89b-12d3-a456-426614174005',
+    example: '123e4567-e89b-12d3-a456-426614174007',
   })
   @Column({ type: 'uuid', nullable: true })
   @IsOptional()
@@ -591,24 +617,14 @@ export class LoanDocument {
   @Exclude({ toPlainOnly: true })
   deletedAt: Date;
 
-  @ApiPropertyOptional({
-    description: 'Version for optimistic locking',
-    example: 1,
-    default: 1,
-  })
-  @Column({ type: 'integer', default: 1, nullable: false })
-  @IsInt()
-  @Min(1)
-  version: number;
-
   // Relations
   @ApiPropertyOptional({
     description: 'Loan associated with this document',
     type: () => Loan,
   })
   @ManyToOne(() => Loan, (loan) => loan.documents, {
-    onDelete: 'CASCADE',
     nullable: true,
+    onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'loanId' })
   @ValidateNested()
@@ -620,13 +636,39 @@ export class LoanDocument {
     type: () => LoanApplication,
   })
   @ManyToOne(() => LoanApplication, (application) => application.documents, {
-    onDelete: 'CASCADE',
     nullable: true,
+    onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'loanApplicationId' })
   @ValidateNested()
   @Type(() => LoanApplication)
   loanApplication: LoanApplication;
+
+  @ApiPropertyOptional({
+    description: 'Guarantor associated with this document',
+    type: () => LoanGuarantor,
+  })
+  @ManyToOne(() => LoanGuarantor, (guarantor) => guarantor.documents, {
+    nullable: true,
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'guarantorId' })
+  @ValidateNested()
+  @Type(() => LoanGuarantor)
+  guarantor: LoanGuarantor;
+
+  @ApiPropertyOptional({
+    description: 'Collateral associated with this document',
+    type: () => LoanCollateral,
+  })
+  @ManyToOne(() => LoanCollateral, (collateral) => collateral.documents, {
+    nullable: true,
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'collateralId' })
+  @ValidateNested()
+  @Type(() => LoanCollateral)
+  collateral: LoanCollateral;
 
   // Computed properties
   @ApiProperty({
@@ -687,16 +729,6 @@ export class LoanDocument {
   }
 
   @ApiProperty({
-    description: 'Whether document is pending upload',
-    example: false,
-    readOnly: true,
-  })
-  @Expose()
-  get isPendingUpload(): boolean {
-    return this.status === DocumentStatus.PENDING_UPLOAD;
-  }
-
-  @ApiProperty({
     description: 'Whether document is expired',
     example: false,
     readOnly: true,
@@ -715,13 +747,10 @@ export class LoanDocument {
   @Expose()
   get daysUntilExpiry(): number | null {
     if (!this.expiryDate) return null;
-    
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
     const expiry = new Date(this.expiryDate);
     expiry.setHours(0, 0, 0, 0);
-    
     const diffTime = expiry.getTime() - today.getTime();
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   }
@@ -734,7 +763,6 @@ export class LoanDocument {
   @Expose()
   get ageInDays(): number {
     if (!this.createdAt) return 0;
-    
     const today = new Date();
     const created = new Date(this.createdAt);
     const diffTime = Math.abs(today.getTime() - created.getTime());
@@ -798,14 +826,12 @@ export class LoanDocument {
       this.documentNumber = this.generateDocumentNumber();
     }
     
-    // Set auto-delete date based on retention period
     if (!this.autoDeleteDate) {
       const deleteDate = new Date();
       deleteDate.setMonth(deleteDate.getMonth() + this.retentionPeriodMonths);
       this.autoDeleteDate = deleteDate;
     }
     
-    // Set uploaded date if status is uploaded
     if (this.status === DocumentStatus.UPLOADED && !this.uploadedAt) {
       this.uploadedAt = new Date();
     }
@@ -813,13 +839,6 @@ export class LoanDocument {
 
   @BeforeUpdate()
   async beforeUpdate() {
-    // Update version for optimistic locking
-    this.version += 1;
-    
-    // Handle status transitions
-    this.handleStatusTransitions();
-    
-    // Check for expiry
     if (this.expiryDate && new Date() > this.expiryDate && this.status !== DocumentStatus.EXPIRED) {
       this.status = DocumentStatus.EXPIRED;
     }
@@ -828,51 +847,20 @@ export class LoanDocument {
   @AfterInsert()
   async afterInsert() {
     console.log(`Loan document created: ${this.documentNumber} (${this.id})`);
-    // Emit event: loan.document.created
   }
 
   @AfterUpdate()
   async afterUpdate() {
     console.log(`Loan document updated: ${this.documentNumber} (${this.id})`);
-    // Emit event: loan.document.updated
   }
 
-  // Business logic methods
   private generateDocumentNumber(): string {
     const timestamp = new Date().getTime().toString().slice(-6);
     const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
     return `DOC-${new Date().getFullYear()}-${timestamp}${random}`;
   }
 
-  private handleStatusTransitions(): void {
-    const now = new Date();
-
-    // Handle verification
-    if (this.status === DocumentStatus.VERIFIED && !this.verifiedAt) {
-      this.verifiedAt = now;
-    }
-
-    // Handle rejection
-    if (this.status === DocumentStatus.REJECTED && !this.rejectedAt) {
-      this.rejectedAt = now;
-    }
-
-    // Handle upload
-    if (this.status === DocumentStatus.UPLOADED && !this.uploadedAt) {
-      this.uploadedAt = now;
-    }
-
-    // Handle review start
-    if (this.status === DocumentStatus.UNDER_REVIEW && !this.reviewStartDate) {
-      this.reviewStartDate = now;
-    }
-
-    // Handle review end
-    if (this.status !== DocumentStatus.UNDER_REVIEW && this.reviewStartDate && !this.reviewEndDate) {
-      this.reviewEndDate = now;
-    }
-  }
-
+  // Methods
   upload(
     fileName: string,
     fileSize: number,
@@ -883,21 +871,6 @@ export class LoanDocument {
     fileHash?: string,
     thumbnailPath?: string,
   ): void {
-    if (this.isUploaded || this.isVerified || this.isRejected) {
-      throw new Error('Document already processed');
-    }
-
-    // Validate file size (max 10MB)
-    const maxSize = 10 * 1024 * 1024; // 10MB
-    if (fileSize > maxSize) {
-      throw new Error(`File size exceeds maximum limit of ${maxSize / (1024 * 1024)}MB`);
-    }
-
-    // Validate file format
-    if (!Object.values(DocumentFormat).includes(fileFormat)) {
-      throw new Error('Invalid file format');
-    }
-
     this.fileName = fileName;
     this.fileSize = fileSize;
     this.fileFormat = fileFormat;
@@ -910,78 +883,29 @@ export class LoanDocument {
     this.uploadedAt = new Date();
   }
 
-  verify(
-    verifiedById: string,
-    verificationMethod: VerificationMethod,
-    verificationScore?: number,
-    verificationDetails?: Record<string, any>,
-  ): void {
-    if (!this.isUploaded && !this.isUnderReview) {
-      throw new Error('Document must be uploaded before verification');
-    }
-
-    if (this.isVerified) {
-      throw new Error('Document already verified');
-    }
-
-    if (this.isRejected) {
-      throw new Error('Cannot verify a rejected document');
-    }
-
-    if (this.isExpired) {
-      throw new Error('Cannot verify an expired document');
-    }
-
+  verify(verifiedById: string, verificationMethod: VerificationMethod, verificationScore?: number): void {
     this.verifiedById = verifiedById;
     this.verificationMethod = verificationMethod;
     this.verificationScore = verificationScore;
-    this.verificationDetails = verificationDetails;
     this.status = DocumentStatus.VERIFIED;
     this.verifiedAt = new Date();
     this.verificationStatus = 'verified';
   }
 
   reject(reason: string, rejectedById?: string): void {
-    if (this.isVerified) {
-      throw new Error('Cannot reject a verified document');
-    }
-
-    if (this.isRejected) {
-      throw new Error('Document already rejected');
-    }
-
     this.rejectionReason = reason;
     this.status = DocumentStatus.REJECTED;
     this.rejectedAt = new Date();
-    
     if (rejectedById) {
       this.verifiedById = rejectedById;
     }
   }
 
   startReview(): void {
-    if (!this.isUploaded) {
-      throw new Error('Document must be uploaded before review');
+    if (this.status === DocumentStatus.UPLOADED) {
+      this.status = DocumentStatus.UNDER_REVIEW;
+      this.reviewStartDate = new Date();
     }
-
-    if (this.isUnderReview) {
-      throw new Error('Document already under review');
-    }
-
-    if (this.isVerified || this.isRejected) {
-      throw new Error('Cannot review a finalized document');
-    }
-
-    this.status = DocumentStatus.UNDER_REVIEW;
-    this.reviewStartDate = new Date();
-  }
-
-  completeReview(): void {
-    if (this.status !== DocumentStatus.UNDER_REVIEW) {
-      throw new Error('Document is not under review');
-    }
-
-    this.reviewEndDate = new Date();
   }
 
   markAsExpired(): void {
@@ -991,7 +915,6 @@ export class LoanDocument {
   incrementView(userId?: string): void {
     this.viewCount += 1;
     this.lastViewedAt = new Date();
-    
     if (userId) {
       this.lastViewedById = userId;
     }
@@ -1001,143 +924,29 @@ export class LoanDocument {
     this.downloadCount += 1;
   }
 
-  extractText(text: string, confidence: number): void {
-    this.extractedText = text;
-    this.ocrConfidence = confidence;
-  }
-
-  updateMetadata(metadata: Record<string, any>): void {
-    this.metadata = { ...this.metadata, ...metadata };
-  }
-
-  addTag(tag: string): void {
-    if (!this.tags) {
-      this.tags = [];
-    }
-    
-    if (!this.tags.includes(tag)) {
-      this.tags.push(tag);
-    }
-  }
-
-  removeTag(tag: string): void {
-    if (!this.tags) return;
-    
-    const index = this.tags.indexOf(tag);
-    if (index > -1) {
-      this.tags.splice(index, 1);
-    }
-  }
-
-  shareWith(party: string): void {
-    if (!this.sharedWith) {
-      this.sharedWith = [];
-    }
-    
-    if (!this.sharedWith.includes(party)) {
-      this.sharedWith.push(party);
-    }
-    
-    this.isShared = true;
-  }
-
-  revokeSharing(party: string): void {
-    if (!this.sharedWith) return;
-    
-    const index = this.sharedWith.indexOf(party);
-    if (index > -1) {
-      this.sharedWith.splice(index, 1);
-    }
-    
-    if (this.sharedWith.length === 0) {
-      this.isShared = false;
-    }
-  }
-
-  getVerificationSummary(): {
-    status: string;
-    method?: string;
-    score?: number;
-    verifiedAt?: Date;
-    verifiedBy?: string;
-  } {
+  // JSON serialization
+  toJSON(): Partial<LoanDocument> {
     return {
-      status: this.status,
-      method: this.verificationMethod,
-      score: this.verificationScore,
-      verifiedAt: this.verifiedAt,
-      verifiedBy: this.verifiedById,
-    };
-  }
-
-  getFileInfo(): {
-    name: string;
-    size: number;
-    sizeFormatted: string;
-    format: string;
-    mimeType: string;
-    hash?: string;
-  } {
-    return {
-      name: this.fileName,
-      size: this.fileSize,
-      sizeFormatted: this.fileSizeFormatted,
-      format: this.fileFormat,
+      id: this.id,
+      documentNumber: this.documentNumber,
+      documentType: this.documentType,
+      name: this.name,
+      fileName: this.fileName,
+      fileSize: this.fileSize,
+      fileSizeFormatted: this.fileSizeFormatted,
+      fileFormat: this.fileFormat,
       mimeType: this.mimeType,
-      hash: this.fileHash,
+      status: this.status,
+      isVerified: this.isVerified,
+      isRejected: this.isRejected,
+      isExpired: this.isExpired,
+      isValid: this.isValid,
+      expiryDate: this.expiryDate,
+      daysUntilExpiry: this.daysUntilExpiry,
+      uploadedAt: this.uploadedAt,
+      verifiedAt: this.verifiedAt,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt,
     };
-  }
-
-  isSimilarTo(other: LoanDocument): boolean {
-    // Check if documents are similar (same type, similar metadata)
-    if (this.documentType !== other.documentType) {
-      return false;
-    }
-
-    if (this.fileHash && other.fileHash && this.fileHash === other.fileHash) {
-      return true;
-    }
-
-    // Check metadata similarity
-    const thisMetadata = JSON.stringify(this.metadata || {});
-    const otherMetadata = JSON.stringify(other.metadata || {});
-    
-    return thisMetadata === otherMetadata;
-  }
-
-  // Utility methods
-  toJSON(): any {
-    const obj = { ...this };
-    // Remove sensitive/internal fields
-    delete obj.internalNotes;
-    delete obj.deletedAt;
-    delete obj.version;
-    delete obj.metadata;
-    delete obj.extractedText;
-    delete obj.sharedWith;
-    return obj;
-  }
-
-  toString(): string {
-    return `LoanDocument#${this.documentNumber} (${this.documentType})`;
-  }
-
-  get isSensitive(): boolean {
-    return this.isConfidential || 
-           this.documentType === DocumentType.IDENTITY_PROOF ||
-           this.documentType === DocumentType.TAX_RETURN ||
-           this.documentType === DocumentType.BANK_STATEMENT;
-  }
-
-  get requiresManualReview(): boolean {
-    return this.documentType === DocumentType.IDENTITY_PROOF ||
-           this.documentType === DocumentType.BUSINESS_REGISTRATION ||
-           (this.ocrConfidence !== null && this.ocrConfidence < 0.7);
-  }
-
-  get canBeAutoVerified(): boolean {
-    return this.documentType === DocumentType.BANK_STATEMENT ||
-           this.documentType === DocumentType.ADDRESS_PROOF ||
-           (this.ocrConfidence !== null && this.ocrConfidence >= 0.9);
   }
 }

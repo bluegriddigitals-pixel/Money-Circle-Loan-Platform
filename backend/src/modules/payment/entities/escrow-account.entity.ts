@@ -6,11 +6,9 @@ import {
   UpdateDateColumn,
   DeleteDateColumn,
   ManyToOne,
-  JoinColumn,
   OneToMany,
+  JoinColumn,
   Index,
-  BeforeInsert,
-  BeforeUpdate,
 } from 'typeorm';
 import { Exclude, Expose } from 'class-transformer';
 import {
@@ -26,19 +24,36 @@ import {
   IsDate,
   IsUUID,
   IsNotEmpty,
-  IsEmail,
-  IsPhoneNumber,
   Min,
   Max,
-  IsInt,
   IsObject,
   IsArray,
   MaxLength,
+  IsEmail,
+  IsPhoneNumber,
 } from 'class-validator';
-import { DecimalColumn } from "../../../shared/decorators/decimal-column.decorator";
+import { DecimalColumn } from '../../../shared/decorators/decimal-column.decorator';
 import { Loan } from '../../loan/entities/loan.entity';
 import { Transaction } from './transaction.entity';
-import { EscrowAccountType, EscrowAccountStatus } from "../enums/escrow.enum";
+import { Disbursement } from './disbursement.entity';
+import { PayoutRequest } from './payout-request.entity';
+
+export enum EscrowAccountType {
+  LOAN_DISBURSEMENT = 'loan_disbursement',
+  LOAN_REPAYMENT = 'loan_repayment',
+  COLLATERAL = 'collateral',
+  TAX_HOLDING = 'tax_holding',
+  FEES_HOLDING = 'fees_holding',
+  GENERAL = 'general',
+}
+
+export enum EscrowAccountStatus {
+  PENDING = 'pending',
+  ACTIVE = 'active',
+  SUSPENDED = 'suspended',
+  CLOSED = 'closed',
+  FROZEN = 'frozen',
+}
 
 @Entity('escrow_accounts')
 @Index(['accountNumber'], { unique: true })
@@ -111,6 +126,20 @@ export class EscrowAccount {
   currentBalance: number;
 
   @ApiProperty({
+    description: 'Available balance (current - pending holds)',
+    example: 45000.0,
+    minimum: 0,
+    readOnly: true,
+  })
+  @Expose()
+  get availableBalance(): number {
+    const pendingHolds = this.transactions
+      ?.filter(t => t.status === 'pending')
+      .reduce((sum, t) => sum + t.amount, 0) || 0;
+    return Math.max(0, this.currentBalance - pendingHolds);
+  }
+
+  @ApiProperty({
     description: 'Initial deposit amount',
     example: 50000.0,
     minimum: 0,
@@ -146,12 +175,12 @@ export class EscrowAccount {
     description: 'Escrow account status',
     enum: EscrowAccountStatus,
     example: EscrowAccountStatus.ACTIVE,
-    default: EscrowAccountStatus.ACTIVE,
+    default: EscrowAccountStatus.PENDING,
   })
   @Column({
     type: 'enum',
     enum: EscrowAccountStatus,
-    default: EscrowAccountStatus.ACTIVE,
+    default: EscrowAccountStatus.PENDING,
     nullable: false,
   })
   @IsEnum(EscrowAccountStatus)
@@ -227,13 +256,17 @@ export class EscrowAccount {
   releaseConditions: string[];
 
   @ApiPropertyOptional({
-    description: 'Hold conditions',
-    example: ['dispute_filed', 'regulatory_hold', 'fraud_investigation'],
+    description: 'Interest rate for funds held',
+    example: 2.5,
+    minimum: 0,
+    maximum: 100,
   })
-  @Column({ type: 'jsonb', nullable: true })
+  @DecimalColumn({ precision: 5, scale: 2, nullable: true })
   @IsOptional()
-  @IsArray()
-  holdConditions: string[];
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  interestRate: number;
 
   @ApiPropertyOptional({
     description: 'Maturity/Release date',
@@ -278,48 +311,6 @@ export class EscrowAccount {
   closeReason: string;
 
   @ApiPropertyOptional({
-    description: 'Interest rate for funds held',
-    example: 2.5,
-    minimum: 0,
-    maximum: 100,
-  })
-  @DecimalColumn({ precision: 5, scale: 2, nullable: true })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(100)
-  interestRate: number;
-
-  @ApiPropertyOptional({
-    description: 'Interest accrued',
-    example: 250.0,
-    minimum: 0,
-  })
-  @DecimalColumn({ precision: 15, scale: 2, default: 0, nullable: false })
-  @IsNumber()
-  @Min(0)
-  interestAccrued: number;
-
-  @ApiPropertyOptional({
-    description: 'Fees charged',
-    example: 100.0,
-    minimum: 0,
-  })
-  @DecimalColumn({ precision: 15, scale: 2, default: 0, nullable: false })
-  @IsNumber()
-  @Min(0)
-  feesCharged: number;
-
-  @ApiPropertyOptional({
-    description: 'Tags for categorization',
-    example: ['loan_disbursement', 'high_value', 'urgent'],
-  })
-  @Column({ type: 'jsonb', nullable: true })
-  @IsOptional()
-  @IsArray()
-  tags: string[];
-
-  @ApiPropertyOptional({
     description: 'Additional metadata',
     example: { customField1: 'value1', customField2: 'value2' },
   })
@@ -336,15 +327,6 @@ export class EscrowAccount {
   @IsOptional()
   @IsString()
   notes: string;
-
-  @ApiPropertyOptional({
-    description: 'Internal notes',
-    example: 'Requires regulatory approval before release',
-  })
-  @Column({ type: 'text', nullable: true })
-  @IsOptional()
-  @IsString()
-  internalNotes: string;
 
   @ApiProperty({
     description: 'Escrow account creation timestamp',
@@ -367,16 +349,6 @@ export class EscrowAccount {
   @Exclude({ toPlainOnly: true })
   deletedAt: Date;
 
-  @ApiPropertyOptional({
-    description: 'Version for optimistic locking',
-    example: 1,
-    default: 1,
-  })
-  @Column({ type: 'integer', default: 1, nullable: false })
-  @IsInt()
-  @Min(1)
-  version: number;
-
   // Relations
   @ApiPropertyOptional({
     description: 'Loan associated with this escrow account',
@@ -390,141 +362,33 @@ export class EscrowAccount {
   loan: Loan;
 
   @ApiPropertyOptional({
-    description: 'Transactions related to this escrow account',
+    description: 'Transactions for this escrow account',
     type: () => [Transaction],
   })
   @OneToMany(() => Transaction, (transaction) => transaction.escrowAccount)
   transactions: Transaction[];
 
-  // Virtual/computed properties
-  @ApiProperty({
-    description: 'Total amount deposited',
-    example: 50000.0,
-    readOnly: true,
+  @ApiPropertyOptional({
+    description: 'Disbursements from this escrow account',
+    type: () => [Disbursement],
   })
-  @Expose()
-  get totalDeposits(): number {
-    if (!this.transactions) return 0;
-    return this.transactions
-      .filter(t => t.type === 'deposit' && t.status === 'completed')
-      .reduce((sum, t) => sum + t.amount, 0);
-  }
-
-  @ApiProperty({
-    description: 'Total amount withdrawn',
-    example: 20000.0,
-    readOnly: true,
+  @OneToMany(() => Disbursement, (disbursement) => disbursement.escrowAccount, {
+    cascade: true,
+    eager: false,
   })
-  @Expose()
-  get totalWithdrawals(): number {
-    if (!this.transactions) return 0;
-    return this.transactions
-      .filter(t => t.type === 'withdrawal' && t.status === 'completed')
-      .reduce((sum, t) => sum + t.amount, 0);
-  }
+  disbursements: Disbursement[];
 
-  @ApiProperty({
-    description: 'Available balance (current - holds)',
-    example: 30000.0,
-    readOnly: true,
+  @ApiPropertyOptional({
+    description: 'Payout requests from this escrow account',
+    type: () => [PayoutRequest],
   })
-  @Expose()
-  get availableBalance(): number {
-    const holds = this.transactions?.filter(t => t.status === 'pending').reduce((sum, t) => sum + t.amount, 0) || 0;
-    return Math.max(0, this.currentBalance - holds);
-  }
-
-  @ApiProperty({
-    description: 'Is escrow account active',
-    example: true,
-    readOnly: true,
+  @OneToMany(() => PayoutRequest, (payout) => payout.escrowAccount, {
+    cascade: true,
+    eager: false,
   })
-  @Expose()
-  get isActive(): boolean {
-    return this.status === EscrowAccountStatus.ACTIVE;
-  }
-
-  @ApiProperty({
-    description: 'Is escrow account frozen',
-    example: false,
-    readOnly: true,
-  })
-  @Expose()
-  get isFrozen(): boolean {
-    return this.status === EscrowAccountStatus.FROZEN;
-  }
-
-  @ApiProperty({
-    description: 'Is escrow account mature/releasable',
-    example: false,
-    readOnly: true,
-  })
-  @Expose()
-  get isMature(): boolean {
-    if (!this.maturityDate) return false;
-    return new Date() >= this.maturityDate;
-  }
-
-  @ApiProperty({
-    description: 'Days until maturity',
-    example: 15,
-    readOnly: true,
-  })
-  @Expose()
-  get daysUntilMaturity(): number | null {
-    if (!this.maturityDate) return null;
-    const today = new Date();
-    const maturity = new Date(this.maturityDate);
-    const diffTime = maturity.getTime() - today.getTime();
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  }
-
-  // Lifecycle hooks
-  @BeforeInsert()
-  generateAccountNumber() {
-    if (!this.accountNumber) {
-      const year = new Date().getFullYear();
-      const random = Math.floor(Math.random() * 10000)
-        .toString()
-        .padStart(4, '0');
-      this.accountNumber = `ESC-${year}-${random}`;
-    }
-  }
-
-  @BeforeUpdate()
-  updateVersion() {
-    this.version += 1;
-  }
+  payoutRequests: PayoutRequest[];
 
   // Business logic methods
-  deposit(amount: number): void {
-    if (amount <= 0) {
-      throw new Error('Deposit amount must be positive');
-    }
-
-    if (this.isFrozen) {
-      throw new Error('Cannot deposit to frozen account');
-    }
-
-    this.currentBalance += amount;
-  }
-
-  withdraw(amount: number): void {
-    if (amount <= 0) {
-      throw new Error('Withdrawal amount must be positive');
-    }
-
-    if (this.isFrozen) {
-      throw new Error('Cannot withdraw from frozen account');
-    }
-
-    if (amount > this.availableBalance) {
-      throw new Error('Insufficient available balance');
-    }
-
-    this.currentBalance -= amount;
-  }
-
   freeze(reason: string): void {
     this.status = EscrowAccountStatus.FROZEN;
     this.frozenAt = new Date();
@@ -543,94 +407,9 @@ export class EscrowAccount {
     if (this.currentBalance > 0) {
       throw new Error('Cannot close account with positive balance');
     }
-
     this.status = EscrowAccountStatus.CLOSED;
     this.closedAt = new Date();
     this.closeReason = reason;
-  }
-
-  addInterest(): void {
-    if (this.interestRate && this.interestRate > 0 && this.currentBalance > 0) {
-      const dailyRate = this.interestRate / 36500;
-      const interest = this.currentBalance * dailyRate;
-      this.interestAccrued += interest;
-      this.currentBalance += interest;
-    }
-  }
-
-  chargeFee(feeAmount: number, feeType: string = 'service_fee'): void {
-    if (feeAmount <= 0) {
-      throw new Error('Fee amount must be positive');
-    }
-
-    if (feeAmount > this.currentBalance) {
-      throw new Error('Insufficient balance to charge fee');
-    }
-
-    this.feesCharged += feeAmount;
-    this.currentBalance -= feeAmount;
-
-    if (!this.metadata) this.metadata = {};
-    if (!this.metadata.feeHistory) this.metadata.feeHistory = [];
-    this.metadata.feeHistory.push({
-      date: new Date(),
-      amount: feeAmount,
-      type: feeType,
-    });
-  }
-
-  // Validation methods
-  @Expose()
-  get isValid(): boolean {
-    return (
-      !!this.accountNumber &&
-      !!this.accountName &&
-      !!this.holderName &&
-      this.currentBalance >= 0
-    );
-  }
-
-  @Expose()
-  get isOverMaximum(): boolean {
-    if (!this.maximumBalance) return false;
-    return this.currentBalance > this.maximumBalance;
-  }
-
-  @Expose()
-  get isUnderMinimum(): boolean {
-    if (!this.minimumBalance) return false;
-    return this.currentBalance < this.minimumBalance;
-  }
-
-  // Helper methods
-  addTag(tag: string): void {
-    if (!this.tags) this.tags = [];
-    if (!this.tags.includes(tag)) {
-      this.tags.push(tag);
-    }
-  }
-
-  removeTag(tag: string): void {
-    if (this.tags) {
-      const index = this.tags.indexOf(tag);
-      if (index > -1) {
-        this.tags.splice(index, 1);
-      }
-    }
-  }
-
-  addReleaseCondition(condition: string): void {
-    if (!this.releaseConditions) this.releaseConditions = [];
-    if (!this.releaseConditions.includes(condition)) {
-      this.releaseConditions.push(condition);
-    }
-  }
-
-  addHoldCondition(condition: string): void {
-    if (!this.holdConditions) this.holdConditions = [];
-    if (!this.holdConditions.includes(condition)) {
-      this.holdConditions.push(condition);
-    }
   }
 
   // JSON serialization
@@ -645,10 +424,6 @@ export class EscrowAccount {
       availableBalance: this.availableBalance,
       holderName: this.holderName,
       beneficiaryName: this.beneficiaryName,
-      isActive: this.isActive,
-      isFrozen: this.isFrozen,
-      isMature: this.isMature,
-      daysUntilMaturity: this.daysUntilMaturity,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,
     };

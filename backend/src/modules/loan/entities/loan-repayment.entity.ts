@@ -13,7 +13,7 @@ import {
   AfterInsert,
   AfterUpdate,
 } from 'typeorm';
-import { Exclude, Expose, Transform, Type } from 'class-transformer';
+import { Exclude, Expose, Type } from 'class-transformer';
 import {
   ApiProperty,
   ApiPropertyOptional,
@@ -27,14 +27,15 @@ import {
   IsDate,
   IsBoolean,
   IsUUID,
-  IsPositive,
   Min,
   Max,
   IsInt,
   IsNotEmpty,
   ValidateNested,
+  IsArray,
+  IsObject,
+  MaxLength,
 } from 'class-validator';
-import { v4 as uuidv4 } from 'uuid';
 import { DecimalColumn } from '../../../shared/decorators/decimal-column.decorator';
 import { Loan } from './loan.entity';
 import { Transaction } from '../../payment/entities/transaction.entity';
@@ -709,6 +710,36 @@ export class LoanRepayment {
     return Math.min(this.amountPaid - principalInterestPaid, this.totalCharges);
   }
 
+  @ApiProperty({
+    description: 'Whether repayment is written off',
+    example: false,
+    readOnly: true,
+  })
+  @Expose()
+  get isWrittenOff(): boolean {
+    return this.status === RepaymentStatus.WRITTEN_OFF;
+  }
+
+  @ApiProperty({
+    description: 'Whether repayment is in collection',
+    example: false,
+    readOnly: true,
+  })
+  @Expose()
+  get isInCollection(): boolean {
+    return this.status === RepaymentStatus.IN_COLLECTION;
+  }
+
+  @ApiProperty({
+    description: 'Whether repayment is cancelled',
+    example: false,
+    readOnly: true,
+  })
+  @Expose()
+  get isCancelled(): boolean {
+    return this.status === RepaymentStatus.CANCELLED;
+  }
+
   // Lifecycle hooks
   @BeforeInsert()
   async beforeInsert() {
@@ -778,7 +809,9 @@ export class LoanRepayment {
   private updateStatus(): void {
     // Update status based on payment amount
     if (this.amountPaid === 0) {
-      if (this.status !== RepaymentStatus.OVERDUE) {
+      if (this.status !== RepaymentStatus.OVERDUE && 
+          this.status !== RepaymentStatus.DUE && 
+          this.status !== RepaymentStatus.PENDING) {
         this.status = RepaymentStatus.PENDING;
       }
     } else if (this.amountPaid >= this.totalAmountDue) {
@@ -1067,17 +1100,5 @@ export class LoanRepayment {
 
   toString(): string {
     return `LoanRepayment#${this.repaymentNumber} (${this.status})`;
-  }
-
-  get isWrittenOff(): boolean {
-    return this.status === RepaymentStatus.WRITTEN_OFF;
-  }
-
-  get isInCollection(): boolean {
-    return this.status === RepaymentStatus.IN_COLLECTION;
-  }
-
-  get isCancelledStatus(): boolean {
-    return this.status === RepaymentStatus.CANCELLED;
   }
 }

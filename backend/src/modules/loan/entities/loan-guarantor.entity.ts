@@ -24,22 +24,17 @@ import {
   IsEnum,
   IsOptional,
   IsDate,
-  IsBoolean,
   IsUUID,
   IsNotEmpty,
   IsEmail,
   IsPhoneNumber,
-  IsPositive,
   Min,
   Max,
   IsInt,
-  ValidateNested,
   IsObject,
   IsArray,
   MaxLength,
-  MinLength,
 } from 'class-validator';
-import { v4 as uuidv4 } from 'uuid';
 import { DecimalColumn } from '../../../shared/decorators/decimal-column.decorator';
 import { Loan } from './loan.entity';
 import { LoanApplication } from './loan-application.entity';
@@ -818,7 +813,7 @@ export class LoanGuarantor {
     nullable: true,
     onDelete: 'CASCADE',
   })
-  @JoinColumn({ name: 'loan_id' })
+  @JoinColumn({ name: 'loanId' })
   loan: Loan;
 
   @ApiPropertyOptional({
@@ -829,7 +824,7 @@ export class LoanGuarantor {
     nullable: true,
     onDelete: 'CASCADE',
   })
-  @JoinColumn({ name: 'loan_application_id' })
+  @JoinColumn({ name: 'loanApplicationId' })
   loanApplication: LoanApplication;
 
   @ApiPropertyOptional({
@@ -838,9 +833,9 @@ export class LoanGuarantor {
   })
   @ManyToOne(() => User, (user) => user.guarantors, {
     nullable: true,
-    onDelete: 'CASCADE',
+    onDelete: 'SET NULL',
   })
-  @JoinColumn({ name: 'user_id' })
+  @JoinColumn({ name: 'userId' })
   user: User;
 
   @ApiPropertyOptional({

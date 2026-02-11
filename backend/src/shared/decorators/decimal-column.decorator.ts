@@ -9,7 +9,7 @@ export function DecimalColumn(
     default?: number;
   } = {},
 ): PropertyDecorator {
-  return (target: Object, propertyKey: string | symbol) => {
+  return (target: object, propertyKey: string | symbol) => {
     const columnOptions: ColumnOptions = {
       type: 'decimal',
       precision: options.precision || 15,
@@ -34,7 +34,7 @@ export function IsDecimal(
     scale?: number;
   },
 ) {
-  return function (object: Object, propertyName: string) {
+  return function (object: object, propertyName: string) {
     registerDecorator({
       name: 'isDecimal',
       target: object.constructor,

@@ -14,9 +14,6 @@ import {
   AfterInsert,
   AfterUpdate,
   AfterRemove,
-  ManyToOne,
-  ManyToMany,
-  JoinTable,
 } from 'typeorm';
 import { Exclude, Transform, Expose, Type } from 'class-transformer';
 import {
@@ -41,9 +38,14 @@ import {
   ValidateNested,
   IsUUID,
 } from 'class-validator';
-import { v4 as uuidv4 } from 'uuid';
 
 import { UserProfile } from './user-profile.entity';
+import { LoanApplication } from '../../loan/entities/loan-application.entity';
+import { Loan } from '../../loan/entities/loan.entity';
+import { LoanGuarantor } from '../../loan/entities/loan-guarantor.entity';
+import { PaymentMethod } from '../../payment/entities/payment-method.entity';
+import { PayoutRequest } from '../../payment/entities/payout-request.entity';
+import { Investment } from '../../marketplace/entities/investment.entity';
 
 export enum UserRole {
   BORROWER = 'borrower',
@@ -752,6 +754,84 @@ export class User {
   @ValidateNested()
   @Type(() => UserProfile)
   profile: UserProfile;
+
+  // ============ LOAN RELATIONS ============
+  @ApiPropertyOptional({
+    description: 'Loan applications submitted by the user',
+    type: () => [LoanApplication],
+  })
+  @OneToMany(() => LoanApplication, (application) => application.user, {
+    cascade: false,
+    eager: false,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => LoanApplication)
+  loanApplications: LoanApplication[];
+
+  @ApiPropertyOptional({
+    description: 'Loans borrowed by the user',
+    type: () => [Loan],
+  })
+  @OneToMany(() => Loan, (loan) => loan.borrower, {
+    cascade: false,
+    eager: false,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => Loan)
+  loans: Loan[];
+
+  @ApiPropertyOptional({
+    description: 'Guarantor obligations for the user',
+    type: () => [LoanGuarantor],
+  })
+  @OneToMany(() => LoanGuarantor, (guarantor) => guarantor.user, {
+    cascade: false,
+    eager: false,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => LoanGuarantor)
+  guarantors: LoanGuarantor[];
+  // ========================================
+
+   // ============ PAYMENT RELATIONS ============
+  @ApiPropertyOptional({
+    description: 'Payment methods for the user',
+    type: () => [PaymentMethod],
+  })
+  @OneToMany(() => PaymentMethod, (paymentMethod) => paymentMethod.user, {
+    cascade: true,
+    eager: false,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => PaymentMethod)
+  paymentMethods: PaymentMethod[];
+
+  @ApiPropertyOptional({
+    description: 'Payout requests from the user',
+    type: () => [PayoutRequest],
+  })
+  @OneToMany(() => PayoutRequest, (payout) => payout.user, {
+    cascade: true,
+    eager: false,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => PayoutRequest)
+  payoutRequests: PayoutRequest[];
+  // ========================================
+
+  // ============ MARKETPLACE RELATIONS ============
+  @ApiPropertyOptional({
+    description: 'Investments made by the user',
+    type: () => [Investment],
+  })
+  @OneToMany(() => Investment, (investment) => investment.investor, {
+    cascade: true,
+    eager: false,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => Investment)
+  investments: Investment[];
+  // ========================================
 
   // Computed properties (virtual fields)
   @ApiProperty({
