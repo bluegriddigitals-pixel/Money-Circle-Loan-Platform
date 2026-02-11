@@ -11,69 +11,69 @@ import { User } from '../../modules/user/entities/user.entity';
 import { UserProfile } from '../../modules/user/entities/user-profile.entity';
 
 // Loan Module Entities
-import { Loan } from '../../modules/loan/entities/loan.entity';
-import { LoanApplication } from '../../modules/loan/entities/loan-application.entity';
-import { LoanRepayment } from '../../modules/loan/entities/loan-repayment.entity';
-import { LoanDocument } from '../../modules/loan/entities/loan-document.entity';
-import { LoanCollateral } from '../../modules/loan/entities/loan-collateral.entity';
-import { LoanGuarantor } from '../../modules/loan/entities/loan-guarantor.entity';
+import { Loan } from "../../modules/loan/entities/loan.entity";
+import { LoanApplication } from "../../modules/loan/entities/loan-application.entity";
+import { LoanRepayment } from "../../modules/loan/entities/loan-repayment.entity";
+import { LoanDocument } from "../../modules/loan/entities/loan-document.entity";
+import { LoanCollateral } from "../../modules/loan/entities/loan-collateral.entity";
+import { LoanGuarantor } from "../../modules/loan/entities/loan-guarantor.entity";
 
 // Payment Module Entities
-import { Transaction } from '../../modules/payment/entities/transaction.entity';
-import { EscrowAccount } from '../../modules/payment/entities/escrow-account.entity';
-import { PaymentMethod } from '../../modules/payment/entities/payment-method.entity';
-import { PayoutRequest } from '../../modules/payment/entities/payout-request.entity';
-import { Disbursement } from '../../modules/payment/entities/disbursement.entity';
+import { Transaction } from "../../modules/payment/entities/transaction.entity";
+import { EscrowAccount } from "../../modules/payment/entities/escrow-account.entity";
+import { PaymentMethod } from "../../modules/payment/entities/payment-method.entity";
+import { PayoutRequest } from "../../modules/payment/entities/payout-request.entity";
+import { Disbursement } from "../../modules/payment/entities/disbursement.entity";
 
 // Marketplace Entities
-import { Investment } from '../../modules/marketplace/entities/investment.entity';
-import { Listing } from '../../modules/marketplace/entities/listing.entity';
-import { Bid } from '../../modules/marketplace/entities/bid.entity';
-import { InvestmentPortfolio } from '../../modules/marketplace/entities/investment-portfolio.entity';
-import { AutoInvestRule } from '../../modules/marketplace/entities/auto-invest-rule.entity';
+import { Investment } from "../../modules/marketplace/entities/investment.entity";
+import { Listing } from "../../modules/marketplace/entities/listing.entity";
+import { Bid } from "../../modules/marketplace/entities/bid.entity";
+import { InvestmentPortfolio } from "../../modules/marketplace/entities/investment-portfolio.entity";
+import { AutoInvestRule } from "../../modules/marketplace/entities/auto-invest-rule.entity";
 
 // Notification Entities
-import { Notification } from '../../modules/notification/entities/notification.entity';
-import { NotificationPreference } from '../../modules/notification/entities/notification-preference.entity';
-import { EmailTemplate } from '../../modules/notification/entities/email-template.entity';
-import { SmsLog } from '../../modules/notification/entities/sms-log.entity';
+import { Notification } from "../../modules/notification/entities/notification.entity";
+import { NotificationPreference } from "../../modules/notification/entities/notification-preference.entity";
+import { EmailTemplate } from "../../modules/notification/entities/email-template.entity";
+import { SmsLog } from "../../modules/notification/entities/sms-log.entity";
 
 // Audit Entities
-import { AuditLog } from '../../modules/audit/entities/audit-log.entity';
-import { SystemLog } from '../../modules/audit/entities/system-log.entity';
-import { AccessLog } from '../../modules/audit/entities/access-log.entity';
+import { AuditLog } from "../../modules/audit/entities/audit-log.entity";
+import { SystemLog } from "../../modules/audit/entities/system-log.entity";
+import { AccessLog } from "../../modules/audit/entities/access-log.entity";
 
 // Compliance Entities
-import { Kyc } from '../../modules/compliance/entities/kyc.entity';
-import { KycDocument } from '../../modules/compliance/entities/kyc-document.entity';
-import { ComplianceCheck } from '../../modules/compliance/entities/compliance-check.entity';
-import { SanctionScreening } from '../../modules/compliance/entities/sanction-screening.entity';
-import { AmlAlert } from '../../modules/compliance/entities/aml-alert.entity';
+import { Kyc } from "../../modules/compliance/entities/kyc.entity";
+import { KycDocument } from "../../modules/compliance/entities/kyc-document.entity";
+import { ComplianceCheck } from "../../modules/compliance/entities/compliance-check.entity";
+import { SanctionScreening } from "../../modules/compliance/entities/sanction-screening.entity";
+import { AmlAlert } from "../../modules/compliance/entities/aml-alert.entity";
 
 // Risk Entities
-import { RiskAssessment } from '../../modules/risk/entities/risk-assessment.entity';
-import { CreditScore } from '../../modules/risk/entities/credit-score.entity';
-import { RiskFactor } from '../../modules/risk/entities/risk-factor.entity';
-import { FraudDetection } from '../../modules/risk/entities/fraud-detection.entity';
-import { BehavioralAnalysis } from '../../modules/risk/entities/behavioral-analysis.entity';
+import { RiskAssessment } from "../../modules/risk/entities/risk-assessment.entity";
+import { CreditScore } from "../../modules/risk/entities/credit-score.entity";
+import { RiskFactor } from "../../modules/risk/entities/risk-factor.entity";
+import { FraudDetection } from "../../modules/risk/entities/fraud-detection.entity";
+import { BehavioralAnalysis } from "../../modules/risk/entities/behavioral-analysis.entity";
 
 // Admin Entities
-import { SystemConfig } from '../../modules/admin/entities/system-config.entity';
-import { AdminUser } from '../../modules/admin/entities/admin-user.entity';
-import { AdminAction } from '../../modules/admin/entities/admin-action.entity';
-import { SystemMaintenance } from '../../modules/admin/entities/system-maintenance.entity';
-import { ApiKey } from '../../modules/admin/entities/api-key.entity';
+import { SystemConfig } from "../../modules/admin/entities/system-config.entity";
+import { AdminUser } from "../../modules/admin/entities/admin-user.entity";
+import { AdminAction } from "../../modules/admin/entities/admin-action.entity";
+import { SystemMaintenance } from "../../modules/admin/entities/system-maintenance.entity";
+import { ApiKey } from "../../modules/admin/entities/api-key.entity";
 
 // Report Entities
-import { FinancialReport } from '../../modules/report/entities/financial-report.entity';
-import { UserReport } from '../../modules/report/entities/user-report.entity';
-import { LoanReport } from '../../modules/report/entities/loan-report.entity';
-import { RiskReport } from '../../modules/report/entities/risk-report.entity';
+import { FinancialReport } from "../../modules/report/entities/financial-report.entity";
+import { UserReport } from "../../modules/report/entities/user-report.entity";
+import { LoanReport } from "../../modules/report/entities/loan-report.entity";
+import { RiskReport } from "../../modules/report/entities/risk-report.entity";
 
 // Analytics Entities
-import { UserAnalytics } from '../../modules/analytics/entities/user-analytics.entity';
-import { LoanAnalytics } from '../../modules/analytics/entities/loan-analytics.entity';
-import { PlatformAnalytics } from '../../modules/analytics/entities/platform-analytics.entity';
+import { UserAnalytics } from "../../modules/analytics/entities/user-analytics.entity";
+import { LoanAnalytics } from "../../modules/analytics/entities/loan-analytics.entity";
+import { PlatformAnalytics } from "../../modules/analytics/entities/platform-analytics.entity";
 
 @Global()
 @Module({

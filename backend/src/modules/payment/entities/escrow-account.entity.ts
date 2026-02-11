@@ -12,7 +12,7 @@ import {
   BeforeInsert,
   BeforeUpdate,
 } from 'typeorm';
-import { Exclude, Expose, Transform, Type } from 'class-transformer';
+import { Exclude, Expose } from 'class-transformer';
 import {
   ApiProperty,
   ApiPropertyOptional,
@@ -28,36 +28,17 @@ import {
   IsNotEmpty,
   IsEmail,
   IsPhoneNumber,
-  IsPositive,
   Min,
   Max,
   IsInt,
   IsObject,
   IsArray,
   MaxLength,
-  MinLength,
-  IsBoolean,
 } from 'class-validator';
-import { DecimalColumn } from '../../../shared/decorators/decimal-column.decorator';
+import { DecimalColumn } from "../../../shared/decorators/decimal-column.decorator";
 import { Loan } from '../../loan/entities/loan.entity';
 import { Transaction } from './transaction.entity';
-
-export enum EscrowAccountStatus {
-  ACTIVE = 'active',
-  PENDING = 'pending',
-  SUSPENDED = 'suspended',
-  CLOSED = 'closed',
-  FROZEN = 'frozen',
-}
-
-export enum EscrowAccountType {
-  LOAN_DISBURSEMENT = 'loan_disbursement',
-  LOAN_REPAYMENT = 'loan_repayment',
-  COLLATERAL = 'collateral',
-  TAX_HOLDING = 'tax_holding',
-  FEES_HOLDING = 'fees_holding',
-  GENERAL = 'general',
-}
+import { EscrowAccountType, EscrowAccountStatus } from "../enums/escrow.enum";
 
 @Entity('escrow_accounts')
 @Index(['accountNumber'], { unique: true })
@@ -234,14 +215,7 @@ export class EscrowAccount {
   @Column({ type: 'jsonb', nullable: true })
   @IsOptional()
   @IsObject()
-  bankAccount: {
-    bankName: string;
-    accountNumber: string;
-    routingNumber?: string;
-    iban?: string;
-    swiftCode?: string;
-    accountType: string;
-  };
+  bankAccount: Record<string, any>;
 
   @ApiPropertyOptional({
     description: 'Release conditions',
@@ -267,7 +241,6 @@ export class EscrowAccount {
   @Column({ type: 'timestamp', nullable: true })
   @IsOptional()
   @IsDate()
-  @Type(() => Date)
   maturityDate: Date;
 
   @ApiPropertyOptional({
@@ -276,7 +249,6 @@ export class EscrowAccount {
   @Column({ type: 'timestamp', nullable: true })
   @IsOptional()
   @IsDate()
-  @Type(() => Date)
   closedAt: Date;
 
   @ApiPropertyOptional({
@@ -285,7 +257,6 @@ export class EscrowAccount {
   @Column({ type: 'timestamp', nullable: true })
   @IsOptional()
   @IsDate()
-  @Type(() => Date)
   frozenAt: Date;
 
   @ApiPropertyOptional({
@@ -413,9 +384,9 @@ export class EscrowAccount {
   })
   @ManyToOne(() => Loan, (loan) => loan.escrowAccounts, {
     nullable: true,
-    onDelete: 'CASCADE',
+    onDelete: 'SET NULL',
   })
-  @JoinColumn({ name: 'loan_id' })
+  @JoinColumn({ name: 'loanId' })
   loan: Loan;
 
   @ApiPropertyOptional({
@@ -521,8 +492,7 @@ export class EscrowAccount {
   }
 
   @BeforeUpdate()
-  updateCalculatedFields() {
-    // Update version for optimistic locking
+  updateVersion() {
     this.version += 1;
   }
 
@@ -564,6 +534,7 @@ export class EscrowAccount {
   unfreeze(): void {
     if (this.status === EscrowAccountStatus.FROZEN) {
       this.status = EscrowAccountStatus.ACTIVE;
+      this.frozenAt = null;
       this.frozenReason = null;
     }
   }
@@ -580,7 +551,7 @@ export class EscrowAccount {
 
   addInterest(): void {
     if (this.interestRate && this.interestRate > 0 && this.currentBalance > 0) {
-      const dailyRate = this.interestRate / 36500; // Convert annual percentage to daily decimal
+      const dailyRate = this.interestRate / 36500;
       const interest = this.currentBalance * dailyRate;
       this.interestAccrued += interest;
       this.currentBalance += interest;
@@ -612,9 +583,9 @@ export class EscrowAccount {
   @Expose()
   get isValid(): boolean {
     return (
-      this.accountNumber &&
-      this.accountName &&
-      this.holderName &&
+      !!this.accountNumber &&
+      !!this.accountName &&
+      !!this.holderName &&
       this.currentBalance >= 0
     );
   }
@@ -663,7 +634,7 @@ export class EscrowAccount {
   }
 
   // JSON serialization
-  toJSON(): any {
+  toJSON(): Partial<EscrowAccount> {
     return {
       id: this.id,
       accountNumber: this.accountNumber,
