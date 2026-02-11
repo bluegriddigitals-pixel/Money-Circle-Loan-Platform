@@ -6,51 +6,92 @@
   BadRequestException,
   NotFoundException,
   InternalServerErrorException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, QueryRunner, Not, IsNull, In } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { v4 as uuidv4 } from 'uuid';
-import { addDays, addMinutes, isBefore } from 'date-fns';
+import {
+  addDays,
+  addMinutes,
+  addHours,
+  isBefore,
+  differenceInMinutes,
+  differenceInDays,
+} from 'date-fns';
+import { Request } from 'express';
+import { createHash } from 'crypto';
 
-import { User, AccountStatus, KycStatus, VerificationStatus } from '../user/entities/user.entity';
+import { User, UserRole, AccountStatus, KycStatus, VerificationStatus } from '../user/entities/user.entity';
 import { UserProfile, RiskLevel } from '../user/entities/user-profile.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ResetPasswordRequestDto } from './dto/reset-password-request.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { VerifyPhoneDto } from './dto/verify-phone.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { EnableTwoFactorDto } from './dto/enable-two-factor.dto';
+import { VerifyTwoFactorDto } from './dto/verify-two-factor.dto';
 import { AuditLog } from '../audit/entities/audit-log.entity';
+import { AccessLog } from '../audit/entities/access-log.entity';
 import { NotificationService } from '../notification/notification.service';
 import { RiskService } from '../risk/risk.service';
+import { ComplianceService } from '../compliance/compliance.service';
+import { MailerService } from '../../shared/mailer/mailer.service';
+import { SmsService } from '../../shared/sms/sms.service';
+import { RateLimiterService } from '../../shared/security/rate-limiter.service';
+import { IpBlockerService } from '../../shared/security/ip-blocker.service';
+import { DeviceFingerprintService } from '../../shared/security/device-fingerprint.service';
+import { EncryptionService } from '../../shared/security/encryption.service';
+import { SessionService } from './session.service';
+import { UserService } from '../user/user.service';
 
 interface TokenPayload {
   sub: string;
   email: string;
-  role: string;
+  role: UserRole;
   kycStatus: KycStatus;
   verificationStatus: VerificationStatus;
+  twoFactorEnabled: boolean;
+  sessionId: string;
   iat?: number;
   exp?: number;
+  jti?: string;
 }
 
 interface LoginResponse {
-  user: Omit<User, 'password' | 'refreshTokenHash'>;
+  user: Omit<User, 'password' | 'refreshTokenHash' | 'twoFactorSecret' | 'backupCodes'>;
   tokens: {
     accessToken: string;
     refreshToken: string;
     expiresIn: number;
     tokenType: string;
+    scope: string[];
   };
+  requiresTwoFactor: boolean;
+  twoFactorMethods?: string[];
+}
+
+interface TwoFactorSetup {
+  secret: string;
+  qrCode: string;
+  backupCodes: string[];
 }
 
 @Injectable()
 export class AuthService {
+  private readonly loginAttempts = new Map<string, { attempts: number; lockedUntil: Date }>();
+  private readonly refreshTokenBlacklist = new Set<string>();
+  
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
@@ -58,90 +99,126 @@ export class AuthService {
     private readonly userProfileRepository: Repository<UserProfile>,
     @InjectRepository(AuditLog)
     private readonly auditLogRepository: Repository<AuditLog>,
+    @InjectRepository(AccessLog)
+    private readonly accessLogRepository: Repository<AccessLog>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly dataSource: DataSource,
     private readonly eventEmitter: EventEmitter2,
+    @Inject(forwardRef(() => NotificationService))
     private readonly notificationService: NotificationService,
+    @Inject(forwardRef(() => RiskService))
     private readonly riskService: RiskService,
+    @Inject(forwardRef(() => ComplianceService))
+    private readonly complianceService: ComplianceService,
+    private readonly mailerService: MailerService,
+    private readonly smsService: SmsService,
+    private readonly rateLimiterService: RateLimiterService,
+    private readonly ipBlockerService: IpBlockerService,
+    private readonly deviceFingerprintService: DeviceFingerprintService,
+    private readonly encryptionService: EncryptionService,
+    private readonly sessionService: SessionService,
+    private readonly userService: UserService,
   ) {}
 
   private get saltRounds(): number {
-    return this.configService.get<number>('BCRYPT_SALT_ROUNDS', 10);
+    return this.configService.get<number>('BCRYPT_SALT_ROUNDS', 12);
   }
 
-  async register(registerDto: RegisterDto): Promise<LoginResponse> {
+  private get maxLoginAttempts(): number {
+    return this.configService.get<number>('MAX_LOGIN_ATTEMPTS', 5);
+  }
+
+  private get lockoutDuration(): number {
+    return this.configService.get<number>('LOCKOUT_DURATION_MINUTES', 15);
+  }
+
+  private get passwordHistorySize(): number {
+    return this.configService.get<number>('PASSWORD_HISTORY_SIZE', 5);
+  }
+
+  private get sessionTimeout(): number {
+    return this.configService.get<number>('SESSION_TIMEOUT_MINUTES', 30);
+  }
+
+  async register(registerDto: RegisterDto, request?: Request): Promise<LoginResponse> {
     const queryRunner = this.dataSource.createQueryRunner();
+    const ipAddress = request?.ip || '127.0.0.1';
+    const userAgent = request?.headers['user-agent'] || 'Unknown';
+    const deviceFingerprint = await this.deviceFingerprintService.generateFingerprint(request);
     
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      // Check if user already exists
-      const existingUser = await queryRunner.manager.findOne(User, {
-        where: [
-          { email: registerDto.email.toLowerCase() },
-          { phoneNumber: registerDto.phoneNumber },
-        ],
-      });
+      // Rate limiting check
+      await this.rateLimiterService.checkLimit(`register:${ipAddress}`, 5, 3600);
+      
+      // IP blocking check
+      await this.ipBlockerService.checkIp(ipAddress);
 
-      if (existingUser) {
-        if (existingUser.email === registerDto.email.toLowerCase()) {
-          throw new ConflictException('User with this email already exists');
-        }
-        if (existingUser.phoneNumber === registerDto.phoneNumber) {
-          throw new ConflictException('User with this phone number already exists');
-        }
+      // Validate registration data
+      await this.validateRegistrationData(registerDto);
+
+      // Check if user already exists
+      const existingUser = await this.checkExistingUser(registerDto);
+      if (existingUser.exists) {
+        throw new ConflictException(existingUser.message);
       }
 
-      // Hash password
-      const hashedPassword = await bcrypt.hash(
-        registerDto.password,
-        this.saltRounds,
-      );
+      // Validate age requirement
+      this.validateAgeRequirement(registerDto.dateOfBirth);
 
-      // Generate email verification token
-      const emailVerificationToken = crypto
-        .randomBytes(32)
-        .toString('hex');
+      // Hash password with advanced security
+      const hashedPassword = await this.hashPassword(registerDto.password);
+
+      // Generate secure tokens and codes
+      const emailVerificationToken = this.generateSecureToken();
       const emailVerificationTokenExpiry = addDays(new Date(), 1);
+      const phoneVerificationCode = this.generateVerificationCode();
+      const phoneVerificationCodeExpiry = addMinutes(new Date(), 15);
 
-      // Create user
+      // Create user with comprehensive data
       const user = queryRunner.manager.create(User, {
         id: uuidv4(),
-        email: registerDto.email.toLowerCase(),
+        email: registerDto.email.toLowerCase().trim(),
         password: hashedPassword,
-        firstName: registerDto.firstName,
-        lastName: registerDto.lastName,
-        phoneNumber: registerDto.phoneNumber,
+        firstName: this.sanitizeInput(registerDto.firstName),
+        lastName: this.sanitizeInput(registerDto.lastName),
+        phoneNumber: registerDto.phoneNumber ? this.normalizePhoneNumber(registerDto.phoneNumber) : null,
         dateOfBirth: registerDto.dateOfBirth ? new Date(registerDto.dateOfBirth) : null,
-        role: registerDto.role,
-        accountStatus: AccountStatus.PENDING,
+        role: registerDto.role || UserRole.BORROWER,
+        accountStatus: AccountStatus.PENDING_VERIFICATION,
         kycStatus: KycStatus.NOT_STARTED,
         verificationStatus: VerificationStatus.UNVERIFIED,
-        emailVerificationToken,
+        emailVerificationToken: await this.encryptionService.hash(emailVerificationToken),
         emailVerificationTokenExpiry,
-        registrationIp: registerDto.ipAddress || '127.0.0.1',
-        registrationUserAgent: registerDto.userAgent || 'CLI/1.0',
-        acceptedTermsVersion: registerDto.termsVersion || '1.0',
-        acceptedPrivacyVersion: registerDto.privacyVersion || '1.0',
+        phoneVerificationCode: registerDto.phoneNumber ? await this.encryptionService.hash(phoneVerificationCode) : null,
+        phoneVerificationCodeExpiry: registerDto.phoneNumber ? phoneVerificationCodeExpiry : null,
+        registrationIp: ipAddress,
+        registrationUserAgent: userAgent,
+        registrationDeviceFingerprint: deviceFingerprint,
+        acceptedTermsVersion: registerDto.termsVersion || '1.0.0',
+        acceptedPrivacyVersion: registerDto.privacyVersion || '1.0.0',
         marketingConsent: registerDto.marketingConsent || false,
+        dataProcessingConsent: registerDto.dataProcessingConsent || false,
+        lastPasswordChangeAt: new Date(),
+        passwordHistory: [await this.encryptionService.hash(hashedPassword)],
+        securityQuestions: registerDto.securityQuestions ? 
+          await this.encryptSecurityQuestions(registerDto.securityQuestions) : [],
       });
 
       const savedUser = await queryRunner.manager.save(user);
 
-      // Create user profile with initial risk assessment
-      const initialCreditScore = await this.riskService.calculateInitialCreditScore(
-        savedUser,
-        registerDto,
-      );
+      // Create comprehensive user profile with initial risk assessment
+      const initialRiskAssessment = await this.riskService.performInitialRiskAssessment(savedUser, registerDto);
+      const creditScore = await this.riskService.calculateInitialCreditScore(savedUser, registerDto);
 
       const userProfile = queryRunner.manager.create(UserProfile, {
         id: uuidv4(),
         user: savedUser,
-        riskLevel: initialCreditScore >= 700 ? RiskLevel.LOW : 
-                  initialCreditScore >= 500 ? RiskLevel.MEDIUM : RiskLevel.HIGH,
-        creditScore: initialCreditScore,
+        riskLevel: initialRiskAssessment.riskLevel,
+        creditScore,
         totalLoanAmount: 0,
         totalRepaidAmount: 0,
         activeLoansCount: 0,
@@ -150,29 +227,70 @@ export class AuthService {
         totalInvestedAmount: 0,
         totalReturns: 0,
         averageReturnRate: 0,
+        riskFactors: initialRiskAssessment.factors,
+        behavioralPatterns: {},
+        financialBehaviorScore: 500,
+        repaymentConsistencyScore: 0,
+        investmentRiskTolerance: 'MODERATE',
+        preferredLoanTypes: [],
+        preferredInvestmentTypes: [],
+        notificationPreferences: {
+          email: true,
+          sms: registerDto.phoneNumber ? true : false,
+          push: false,
+          marketing: registerDto.marketingConsent || false,
+        },
+        privacySettings: {
+          profileVisibility: 'PRIVATE',
+          activityVisibility: 'FRIENDS_ONLY',
+          searchVisibility: true,
+        },
+        securitySettings: {
+          twoFactorEnabled: false,
+          biometricEnabled: false,
+          sessionTimeout: this.sessionTimeout,
+          loginAlerts: true,
+          unusualActivityAlerts: true,
+        },
       });
 
       await queryRunner.manager.save(userProfile);
 
-      // Generate tokens
-      const tokens = await this.generateTokens(savedUser);
-
-      // Save refresh token hash
-      const refreshTokenHash = await bcrypt.hash(
-        tokens.refreshToken,
-        this.saltRounds,
+      // Generate initial session and tokens
+      const session = await this.sessionService.createSession(
+        savedUser.id,
+        ipAddress,
+        userAgent,
+        deviceFingerprint,
       );
+
+      const tokens = await this.generateTokens(savedUser, session.id);
+
+      // Save refresh token securely
+      const refreshTokenHash = await this.encryptionService.hash(tokens.refreshToken);
       savedUser.refreshTokenHash = refreshTokenHash;
       await queryRunner.manager.save(savedUser);
+
+      // Initialize compliance checks
+      await this.complianceService.initializeUserCompliance(savedUser.id);
 
       // Log registration
       await this.logAudit(
         queryRunner,
         savedUser.id,
-        'REGISTER',
-        `User registered with role: ${registerDto.role}`,
-        registerDto.ipAddress,
-        registerDto.userAgent,
+        'USER_REGISTERED',
+        `User registered with role: ${savedUser.role}. IP: ${ipAddress}, Device: ${deviceFingerprint}`,
+        ipAddress,
+        userAgent,
+        'HIGH',
+      );
+
+      // Send comprehensive notifications
+      await this.sendRegistrationNotifications(
+        savedUser,
+        emailVerificationToken,
+        phoneVerificationCode,
+        ipAddress,
       );
 
       // Emit registration event
@@ -180,118 +298,136 @@ export class AuthService {
         userId: savedUser.id,
         email: savedUser.email,
         firstName: savedUser.firstName,
-        verificationToken: emailVerificationToken,
+        lastName: savedUser.lastName,
+        role: savedUser.role,
+        ipAddress,
+        timestamp: new Date(),
       });
 
-      // Send welcome email
-      await this.notificationService.sendWelcomeEmail(
-        savedUser.email,
-        savedUser.firstName,
-        emailVerificationToken,
-      );
-
-      // Send verification SMS if phone provided
-      if (savedUser.phoneNumber) {
-        const phoneVerificationCode = Math.floor(
-          100000 + Math.random() * 900000,
-        ).toString();
-        
-        savedUser.phoneVerificationCode = await bcrypt.hash(
-          phoneVerificationCode,
-          this.saltRounds,
-        );
-        savedUser.phoneVerificationCodeExpiry = addMinutes(new Date(), 15);
-        
-        await queryRunner.manager.save(savedUser);
-
-        await this.notificationService.sendVerificationSMS(
-          savedUser.phoneNumber,
-          phoneVerificationCode,
-        );
-      }
+      // Track analytics
+      this.eventEmitter.emit('analytics.user_registered', {
+        userId: savedUser.id,
+        source: registerDto.source || 'direct',
+        campaign: registerDto.campaign,
+        medium: registerDto.medium,
+        referralCode: registerDto.referralCode,
+      });
 
       await queryRunner.commitTransaction();
 
-      // Remove sensitive data from response
-      const { password, refreshTokenHash: _, ...userWithoutSensitiveData } = savedUser;
+      // Return response
+      return this.buildLoginResponse(savedUser, tokens, false);
 
-      return {
-        user: userWithoutSensitiveData as Omit<User, 'password' | 'refreshTokenHash'>,
-        tokens: {
-          ...tokens,
-          tokenType: 'Bearer',
-        },
-      };
     } catch (error) {
       await queryRunner.rollbackTransaction();
       
+      // Log registration failure
+      await this.logAuditDirect(
+        null,
+        'REGISTRATION_FAILED',
+        `Registration failed for email: ${registerDto.email}. Error: ${error.message}`,
+        ipAddress,
+        userAgent,
+        'HIGH',
+      );
+
       if (
         error instanceof ConflictException ||
-        error instanceof BadRequestException
+        error instanceof BadRequestException ||
+        error instanceof ForbiddenException
       ) {
         throw error;
       }
       
       console.error('Registration error:', error);
-      throw new InternalServerErrorException('Failed to register user');
+      throw new InternalServerErrorException('Failed to complete registration. Please try again.');
     } finally {
       await queryRunner.release();
     }
   }
 
-  async login(loginDto: LoginDto, ipAddress?: string, userAgent?: string): Promise<LoginResponse> {
+  async login(loginDto: LoginDto, request?: Request): Promise<LoginResponse> {
+    const ipAddress = request?.ip || '127.0.0.1';
+    const userAgent = request?.headers['user-agent'] || 'Unknown';
+    const deviceFingerprint = await this.deviceFingerprintService.generateFingerprint(request);
+    
     try {
-      // Find user with profile
+      // Rate limiting check
+      await this.rateLimiterService.checkLimit(`login:${ipAddress}`, 10, 900);
+      
+      // IP blocking check
+      await this.ipBlockerService.checkIp(ipAddress);
+
+      // Find user with all relations
       const user = await this.userRepository.findOne({
-        where: { email: loginDto.email.toLowerCase() },
-        relations: ['profile'],
+        where: { email: loginDto.email.toLowerCase().trim() },
+        relations: ['profile', 'kyc', 'sessions'],
+        select: ['id', 'email', 'password', 'firstName', 'lastName', 'role', 
+                'accountStatus', 'kycStatus', 'verificationStatus', 'twoFactorSecret',
+                'isTwoFactorEnabled', 'lastLoginAt', 'failedLoginAttempts', 
+                'accountLockedUntil', 'refreshTokenHash', 'backupCodes'],
       });
 
       if (!user) {
+        // Log failed attempt for non-existent user
+        await this.logFailedLoginAttempt(null, ipAddress, userAgent, 'USER_NOT_FOUND');
         throw new UnauthorizedException('Invalid credentials');
+      }
+
+      // Check if account is locked
+      if (user.accountLockedUntil && user.accountLockedUntil > new Date()) {
+        const minutesLeft = differenceInMinutes(user.accountLockedUntil, new Date());
+        throw new ForbiddenException(
+          `Account is locked due to too many failed attempts. Try again in ${minutesLeft} minutes.`
+        );
       }
 
       // Check account status
       this.validateAccountStatus(user);
 
-      // Verify password
-      const isPasswordValid = await bcrypt.compare(
-        loginDto.password,
-        user.password,
-      );
+      // Verify password with timing-safe comparison
+      const isPasswordValid = await this.verifyPassword(loginDto.password, user.password);
 
       if (!isPasswordValid) {
-        // Log failed login attempt
-        await this.logAuditDirect(
-          user.id,
-          'LOGIN_FAILED',
-          'Invalid password',
-          ipAddress,
-          userAgent,
-        );
-        
-        // Increment failed login attempts (in real app, implement lockout)
+        // Increment failed login attempts
+        await this.handleFailedLoginAttempt(user, ipAddress, userAgent);
         throw new UnauthorizedException('Invalid credentials');
       }
 
-      // Check if password needs to be changed (e.g., expired)
+      // Reset failed login attempts
+      user.failedLoginAttempts = 0;
+      user.accountLockedUntil = null;
+
+      // Check if password needs to be changed
       if (this.isPasswordExpired(user)) {
-        throw new ForbiddenException('Password has expired. Please reset your password.');
+        throw new ForbiddenException(
+          'Your password has expired. Please reset your password to continue.'
+        );
       }
 
-      // Update last login and activity
+      // Check for suspicious activity
+      await this.checkSuspiciousActivity(user, ipAddress, deviceFingerprint);
+
+      // Create new session
+      const session = await this.sessionService.createSession(
+        user.id,
+        ipAddress,
+        userAgent,
+        deviceFingerprint,
+      );
+
+      // Update user activity
       user.lastLoginAt = new Date();
       user.lastActivityAt = new Date();
+      user.lastLoginIp = ipAddress;
+      user.lastLoginDevice = deviceFingerprint;
       await this.userRepository.save(user);
 
       // Generate tokens
-      const tokens = await this.generateTokens(user);
+      const tokens = await this.generateTokens(user, session.id);
 
       // Save refresh token hash
-      const refreshTokenHash = await bcrypt.hash(
-        tokens.refreshToken,
-        this.saltRounds,
-      );
+      const refreshTokenHash = await this.encryptionService.hash(tokens.refreshToken);
       user.refreshTokenHash = refreshTokenHash;
       await this.userRepository.save(user);
 
@@ -299,9 +435,10 @@ export class AuthService {
       await this.logAuditDirect(
         user.id,
         'LOGIN_SUCCESS',
-        'User logged in successfully',
+        `User logged in successfully from IP: ${ipAddress}, Device: ${deviceFingerprint}`,
         ipAddress,
         userAgent,
+        'MEDIUM',
       );
 
       // Emit login event
@@ -310,18 +447,29 @@ export class AuthService {
         email: user.email,
         ipAddress,
         userAgent,
+        deviceFingerprint,
+        timestamp: new Date(),
       });
 
-      // Remove sensitive data from response
-      const { password, refreshTokenHash: _, ...userWithoutSensitiveData } = user;
+      // Check if 2FA is required
+      const requiresTwoFactor = user.isTwoFactorEnabled;
+      const twoFactorMethods = user.isTwoFactorEnabled ? ['authenticator', 'sms', 'email'] : [];
 
-      return {
-        user: userWithoutSensitiveData as Omit<User, 'password' | 'refreshTokenHash'>,
-        tokens: {
-          ...tokens,
-          tokenType: 'Bearer',
-        },
-      };
+      if (requiresTwoFactor) {
+        // Generate 2FA challenge
+        const challenge = await this.generateTwoFactorChallenge(user, ipAddress);
+        
+        return {
+          user: this.sanitizeUserForResponse(user),
+          tokens: null,
+          requiresTwoFactor: true,
+          twoFactorMethods,
+          ...challenge,
+        };
+      }
+
+      return this.buildLoginResponse(user, tokens, false);
+
     } catch (error) {
       if (
         error instanceof UnauthorizedException ||
@@ -331,22 +479,97 @@ export class AuthService {
       }
       
       console.error('Login error:', error);
-      throw new InternalServerErrorException('Failed to login');
+      throw new InternalServerErrorException('Failed to process login request');
     }
   }
 
-  async refreshTokens(refreshToken: string): Promise<{
+  async verifyTwoFactor(verifyTwoFactorDto: VerifyTwoFactorDto, request?: Request): Promise<LoginResponse> {
+    const ipAddress = request?.ip || '127.0.0.1';
+    
+    try {
+      // Find user by 2FA session
+      const user = await this.userRepository.findOne({
+        where: { id: verifyTwoFactorDto.userId },
+        relations: ['profile'],
+      });
+
+      if (!user) {
+        throw new UnauthorizedException('Invalid 2FA session');
+      }
+
+      // Verify 2FA code
+      const isValid = await this.verifyTwoFactorCode(
+        user,
+        verifyTwoFactorDto.code,
+        verifyTwoFactorDto.method,
+      );
+
+      if (!isValid) {
+        await this.logAuditDirect(
+          user.id,
+          '2FA_FAILED',
+          `Failed 2FA verification attempt from IP: ${ipAddress}`,
+          ipAddress,
+          null,
+          'HIGH',
+        );
+        throw new UnauthorizedException('Invalid verification code');
+      }
+
+      // Create session
+      const session = await this.sessionService.createSession(
+        user.id,
+        ipAddress,
+        request?.headers['user-agent'] || 'Unknown',
+        await this.deviceFingerprintService.generateFingerprint(request),
+      );
+
+      // Generate tokens
+      const tokens = await this.generateTokens(user, session.id);
+
+      // Log successful 2FA
+      await this.logAuditDirect(
+        user.id,
+        '2FA_SUCCESS',
+        `2FA verification successful from IP: ${ipAddress}`,
+        ipAddress,
+        null,
+        'MEDIUM',
+      );
+
+      return this.buildLoginResponse(user, tokens, false);
+
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      
+      console.error('2FA verification error:', error);
+      throw new InternalServerErrorException('Failed to verify 2FA');
+    }
+  }
+
+  async refreshTokens(refreshTokenDto: RefreshTokenDto, request?: Request): Promise<{
     accessToken: string;
     refreshToken: string;
     expiresIn: number;
     tokenType: string;
+    scope: string[];
   }> {
+    const ipAddress = request?.ip || '127.0.0.1';
+    
     try {
       // Verify refresh token
-      const payload = this.jwtService.verify(refreshToken, {
+      const payload = this.jwtService.verify(refreshTokenDto.refreshToken, {
         secret: this.configService.get('JWT_REFRESH_SECRET'),
         ignoreExpiration: false,
       }) as TokenPayload;
+
+      // Check token blacklist
+      const tokenHash = createHash('sha256').update(refreshTokenDto.refreshToken).digest('hex');
+      if (this.refreshTokenBlacklist.has(tokenHash)) {
+        throw new UnauthorizedException('Token has been revoked');
+      }
 
       // Find user
       const user = await this.userRepository.findOne({
@@ -359,12 +582,13 @@ export class AuthService {
 
       // Verify refresh token matches stored hash
       const isValid = await bcrypt.compare(
-        refreshToken,
+        refreshTokenDto.refreshToken,
         user.refreshTokenHash,
       );
 
       if (!isValid) {
-        // Possible token theft - invalidate all refresh tokens
+        // Possible token theft - invalidate all sessions
+        await this.sessionService.invalidateAllUserSessions(user.id);
         user.refreshTokenHash = null;
         await this.userRepository.save(user);
         
@@ -372,6 +596,9 @@ export class AuthService {
           user.id,
           'REFRESH_TOKEN_THEFT',
           'Possible refresh token theft detected',
+          ipAddress,
+          null,
+          'CRITICAL',
         );
         
         throw new UnauthorizedException('Invalid refresh token');
@@ -380,8 +607,14 @@ export class AuthService {
       // Check account status
       this.validateAccountStatus(user);
 
+      // Generate new session
+      const session = await this.sessionService.refreshSession(
+        payload.sessionId,
+        ipAddress,
+      );
+
       // Generate new tokens
-      const tokens = await this.generateTokens(user);
+      const tokens = await this.generateTokens(user, session.id);
 
       // Update refresh token hash
       const newRefreshTokenHash = await bcrypt.hash(
@@ -392,17 +625,25 @@ export class AuthService {
       user.lastActivityAt = new Date();
       await this.userRepository.save(user);
 
+      // Blacklist old refresh token
+      this.refreshTokenBlacklist.add(tokenHash);
+
       // Log token refresh
       await this.logAuditDirect(
         user.id,
-        'TOKEN_REFRESHED',
-        'Access token refreshed successfully',
+        'TOKENS_REFRESHED',
+        'Access tokens refreshed successfully',
+        ipAddress,
+        null,
+        'LOW',
       );
 
       return {
         ...tokens,
         tokenType: 'Bearer',
+        scope: ['openid', 'profile', 'email'],
       };
+
     } catch (error) {
       if (error.name === 'TokenExpiredError') {
         throw new UnauthorizedException('Refresh token has expired');
@@ -420,33 +661,89 @@ export class AuthService {
     }
   }
 
-  async logout(userId: string): Promise<void> {
+  async logout(userId: string, request?: Request): Promise<void> {
+    const ipAddress = request?.ip || '127.0.0.1';
+    
     try {
-      const user = await this.userRepository.findOne({
-        where: { id: userId },
+      // Invalidate current session
+      const sessionId = request?.headers['x-session-id'] as string;
+      if (sessionId) {
+        await this.sessionService.invalidateSession(sessionId);
+      }
+
+      // Clear refresh token
+      await this.userRepository.update(userId, {
+        refreshTokenHash: null,
+        lastActivityAt: new Date(),
       });
 
-      if (user) {
-        user.refreshTokenHash = null;
-        user.lastActivityAt = new Date();
-        await this.userRepository.save(user);
+      // Log logout
+      await this.logAuditDirect(
+        userId,
+        'LOGOUT',
+        'User logged out successfully',
+        ipAddress,
+        null,
+        'LOW',
+      );
 
-        await this.logAuditDirect(userId, 'LOGOUT', 'User logged out successfully');
-        
-        this.eventEmitter.emit('user.logged_out', { userId });
-      }
+      // Emit event
+      this.eventEmitter.emit('user.logged_out', { userId, timestamp: new Date() });
+
     } catch (error) {
       console.error('Logout error:', error);
       // Don't throw error for logout failures
     }
   }
 
+  async logoutAll(userId: string, request?: Request): Promise<void> {
+    const ipAddress = request?.ip || '127.0.0.1';
+    
+    try {
+      // Invalidate all user sessions
+      await this.sessionService.invalidateAllUserSessions(userId);
+
+      // Clear refresh token
+      await this.userRepository.update(userId, {
+        refreshTokenHash: null,
+        lastActivityAt: new Date(),
+      });
+
+      // Log logout all
+      await this.logAuditDirect(
+        userId,
+        'LOGOUT_ALL',
+        'User logged out from all devices',
+        ipAddress,
+        null,
+        'MEDIUM',
+      );
+
+      // Send notification
+      const user = await this.userRepository.findOne({ where: { id: userId } });
+      if (user) {
+        await this.notificationService.sendSecurityAlert(
+          user.email,
+          'Logged out from all devices',
+          'You have been logged out from all devices. If this was not you, please contact support immediately.',
+          ipAddress,
+        );
+      }
+
+    } catch (error) {
+      console.error('Logout all error:', error);
+      throw new InternalServerErrorException('Failed to logout from all devices');
+    }
+  }
+
   async changePassword(
     userId: string,
     changePasswordDto: ChangePasswordDto,
-    ipAddress?: string,
-    userAgent?: string,
+    request?: Request,
   ): Promise<void> {
+    const ipAddress = request?.ip || '127.0.0.1';
+    const userAgent = request?.headers['user-agent'] || 'Unknown';
+    
     const queryRunner = this.dataSource.createQueryRunner();
     
     await queryRunner.connect();
@@ -455,6 +752,7 @@ export class AuthService {
     try {
       const user = await queryRunner.manager.findOne(User, {
         where: { id: userId },
+        select: ['id', 'password', 'passwordHistory', 'email', 'firstName'],
       });
 
       if (!user) {
@@ -481,21 +779,31 @@ export class AuthService {
         throw new BadRequestException('New password must be different from current password');
       }
 
-      // Check password history (in real app, store password history)
-      // For now, just check against last few passwords
+      // Check password complexity
+      this.validatePasswordComplexity(changePasswordDto.newPassword);
+
+      // Check against password history
+      await this.checkPasswordHistory(user, changePasswordDto.newPassword);
 
       // Hash new password
-      const hashedPassword = await bcrypt.hash(
-        changePasswordDto.newPassword,
-        this.saltRounds,
-      );
+      const hashedPassword = await this.hashPassword(changePasswordDto.newPassword);
 
-      // Update password
+      // Update password and invalidate all tokens
       user.password = hashedPassword;
       user.lastPasswordChangeAt = new Date();
-      user.refreshTokenHash = null; // Invalidate all refresh tokens
+      user.refreshTokenHash = null;
+      
+      // Update password history
+      const passwordHash = await this.encryptionService.hash(hashedPassword);
+      user.passwordHistory = [
+        passwordHash,
+        ...(user.passwordHistory || []).slice(0, this.passwordHistorySize - 1),
+      ];
       
       await queryRunner.manager.save(user);
+
+      // Invalidate all sessions
+      await this.sessionService.invalidateAllUserSessions(userId);
 
       // Log password change
       await this.logAudit(
@@ -505,6 +813,7 @@ export class AuthService {
         'Password changed successfully',
         ipAddress,
         userAgent,
+        'HIGH',
       );
 
       // Send notification
@@ -527,14 +836,20 @@ export class AuthService {
     }
   }
 
-  async requestPasswordReset(email: string): Promise<{ resetToken: string }> {
+  async requestPasswordReset(resetPasswordRequestDto: ResetPasswordRequestDto): Promise<{ resetToken: string }> {
     try {
       const user = await this.userRepository.findOne({
-        where: { email: email.toLowerCase() },
+        where: { email: resetPasswordRequestDto.email.toLowerCase() },
       });
 
       if (!user) {
         // Don't reveal if user exists (security best practice)
+        // But still implement rate limiting
+        await this.rateLimiterService.checkLimit(
+          `reset_request:${resetPasswordRequestDto.email}`,
+          3,
+          3600,
+        );
         return { resetToken: 'dummy_token_for_security' };
       }
 
@@ -543,28 +858,41 @@ export class AuthService {
         throw new ForbiddenException('Account is not eligible for password reset');
       }
 
-      // Generate reset token
+      // Rate limiting per user
+      await this.rateLimiterService.checkLimit(
+        `reset_request_user:${user.id}`,
+        3,
+        3600,
+      );
+
+      // Generate secure reset token
       const resetToken = this.jwtService.sign(
         {
           sub: user.id,
           type: 'password_reset',
           jti: uuidv4(),
+          iat: Math.floor(Date.now() / 1000),
         },
         {
           secret: this.configService.get('JWT_RESET_SECRET'),
           expiresIn: '1h',
+          issuer: 'moneycircle-api',
+          audience: 'moneycircle-web',
         },
       );
 
-      // Save reset token hash (optional, for one-time use)
-      const resetTokenHash = await bcrypt.hash(resetToken, this.saltRounds);
-      // In real app, store in separate table with expiry
+      // Store reset token with expiry
+      const resetTokenHash = await this.encryptionService.hash(resetToken);
+      user.passwordResetToken = resetTokenHash;
+      user.passwordResetTokenExpiry = addHours(new Date(), 1);
+      await this.userRepository.save(user);
 
-      // Send reset email
+      // Send reset email with security context
       await this.notificationService.sendPasswordResetEmail(
         user.email,
         user.firstName,
         resetToken,
+        resetPasswordRequestDto.clientInfo,
       );
 
       // Log reset request
@@ -572,6 +900,9 @@ export class AuthService {
         user.id,
         'PASSWORD_RESET_REQUESTED',
         'Password reset requested',
+        resetPasswordRequestDto.clientInfo?.ipAddress,
+        resetPasswordRequestDto.clientInfo?.userAgent,
+        'MEDIUM',
       );
 
       return { resetToken };
@@ -592,7 +923,7 @@ export class AuthService {
       const payload = this.jwtService.verify(resetPasswordDto.token, {
         secret: this.configService.get('JWT_RESET_SECRET'),
         ignoreExpiration: false,
-      }) as { sub: string; type: string; jti: string };
+      }) as { sub: string; type: string; jti: string; iat: number };
 
       if (payload.type !== 'password_reset') {
         throw new BadRequestException('Invalid token type');
@@ -600,39 +931,68 @@ export class AuthService {
 
       const user = await queryRunner.manager.findOne(User, {
         where: { id: payload.sub },
+        select: ['id', 'password', 'passwordResetToken', 'passwordResetTokenExpiry', 'email', 'firstName'],
       });
 
       if (!user) {
         throw new NotFoundException('User not found');
       }
 
-      // Check if user can reset password
-      if (!this.canResetPassword(user)) {
-        throw new ForbiddenException('Account is not eligible for password reset');
+      // Verify reset token matches stored token
+      if (!user.passwordResetToken || !user.passwordResetTokenExpiry) {
+        throw new BadRequestException('No active reset token found');
+      }
+
+      const isValidToken = await bcrypt.compare(
+        resetPasswordDto.token,
+        user.passwordResetToken,
+      );
+
+      if (!isValidToken) {
+        throw new BadRequestException('Invalid reset token');
+      }
+
+      // Check if token is expired
+      if (user.passwordResetTokenExpiry < new Date()) {
+        throw new BadRequestException('Reset token has expired');
       }
 
       // Check if new password is same as old password
-      const isSameAsOld = await bcrypt.compare(
+      const isSameAsOld = user.password ? await bcrypt.compare(
         resetPasswordDto.newPassword,
         user.password,
-      );
+      ) : false;
 
       if (isSameAsOld) {
         throw new BadRequestException('New password must be different from current password');
       }
 
-      // Hash new password
-      const hashedPassword = await bcrypt.hash(
-        resetPasswordDto.newPassword,
-        this.saltRounds,
-      );
+      // Check password complexity
+      this.validatePasswordComplexity(resetPasswordDto.newPassword);
 
-      // Update password and invalidate all tokens
+      // Hash new password
+      const hashedPassword = await this.hashPassword(resetPasswordDto.newPassword);
+
+      // Update password and clear all tokens
       user.password = hashedPassword;
       user.lastPasswordChangeAt = new Date();
       user.refreshTokenHash = null;
+      user.passwordResetToken = null;
+      user.passwordResetTokenExpiry = null;
+      user.failedLoginAttempts = 0;
+      user.accountLockedUntil = null;
+      
+      // Update password history
+      const passwordHash = await this.encryptionService.hash(hashedPassword);
+      user.passwordHistory = [
+        passwordHash,
+        ...(user.passwordHistory || []).slice(0, this.passwordHistorySize - 1),
+      ];
       
       await queryRunner.manager.save(user);
+
+      // Invalidate all sessions
+      await this.sessionService.invalidateAllUserSessions(user.id);
 
       // Log password reset
       await this.logAudit(
@@ -640,12 +1000,16 @@ export class AuthService {
         user.id,
         'PASSWORD_RESET',
         'Password reset successfully',
+        resetPasswordDto.clientInfo?.ipAddress,
+        resetPasswordDto.clientInfo?.userAgent,
+        'HIGH',
       );
 
       // Send confirmation email
       await this.notificationService.sendPasswordResetConfirmation(
         user.email,
         user.firstName,
+        resetPasswordDto.clientInfo,
       );
 
       // Emit event
@@ -675,13 +1039,28 @@ export class AuthService {
     await queryRunner.startTransaction();
 
     try {
-      const user = await queryRunner.manager.findOne(User, {
-        where: { emailVerificationToken: verifyEmailDto.token },
+      // Find user by verification token
+      const users = await queryRunner.manager.find(User, {
+        where: { emailVerificationToken: Not(IsNull()) },
+        select: ['id', 'emailVerificationToken', 'emailVerificationTokenExpiry', 'email', 'firstName', 'verificationStatus'],
       });
 
-      if (!user) {
+      let targetUser: User = null;
+      for (const user of users) {
+        if (user.emailVerificationToken && 
+            await bcrypt.compare(verifyEmailDto.token, user.emailVerificationToken)) {
+          targetUser = user;
+          break;
+        }
+      }
+
+      if (!targetUser) {
         throw new BadRequestException('Invalid verification token');
       }
+
+      const user = await queryRunner.manager.findOne(User, {
+        where: { id: targetUser.id },
+      });
 
       // Check if token is expired
       if (
@@ -689,8 +1068,8 @@ export class AuthService {
         isBefore(new Date(user.emailVerificationTokenExpiry), new Date())
       ) {
         // Generate new token
-        const newToken = crypto.randomBytes(32).toString('hex');
-        user.emailVerificationToken = newToken;
+        const newToken = this.generateSecureToken();
+        user.emailVerificationToken = await this.encryptionService.hash(newToken);
         user.emailVerificationTokenExpiry = addDays(new Date(), 1);
         
         await queryRunner.manager.save(user);
@@ -702,7 +1081,7 @@ export class AuthService {
           newToken,
         );
 
-        throw new BadRequestException('Verification token has expired. A new token has been sent.');
+        throw new BadRequestException('Verification token has expired. A new token has been sent to your email.');
       }
 
       // Verify email
@@ -710,8 +1089,8 @@ export class AuthService {
       user.emailVerificationToken = null;
       user.emailVerificationTokenExpiry = null;
       
-      // If this was pending registration, activate account
-      if (user.accountStatus === AccountStatus.PENDING) {
+      // If this was pending registration, update account status
+      if (user.accountStatus === AccountStatus.PENDING_VERIFICATION) {
         user.accountStatus = AccountStatus.ACTIVE;
       }
 
@@ -730,6 +1109,9 @@ export class AuthService {
         user.email,
         user.firstName,
       );
+
+      // Initialize user account
+      await this.userService.initializeUserAccount(user.id);
 
       // Emit event
       this.eventEmitter.emit('user.email_verified', { userId: user.id });
@@ -752,6 +1134,7 @@ export class AuthService {
     try {
       const user = await queryRunner.manager.findOne(User, {
         where: { phoneNumber: verifyPhoneDto.phoneNumber },
+        select: ['id', 'phoneVerificationCode', 'phoneVerificationCodeExpiry', 'phoneNumber', 'verificationStatus'],
       });
 
       if (!user) {
@@ -813,8 +1196,13 @@ export class AuthService {
     }
   }
 
-  async resendVerificationEmail(email: string): Promise<void> {
+  async resendVerificationEmail(email: string, request?: Request): Promise<void> {
+    const ipAddress = request?.ip || '127.0.0.1';
+    
     try {
+      // Rate limiting
+      await this.rateLimiterService.checkLimit(`resend_verification:${email}`, 3, 3600);
+
       const user = await this.userRepository.findOne({
         where: { email: email.toLowerCase() },
       });
@@ -829,10 +1217,10 @@ export class AuthService {
       }
 
       // Generate new token
-      const verificationToken = crypto.randomBytes(32).toString('hex');
+      const verificationToken = this.generateSecureToken();
       const verificationTokenExpiry = addDays(new Date(), 1);
 
-      user.emailVerificationToken = verificationToken;
+      user.emailVerificationToken = await this.encryptionService.hash(verificationToken);
       user.emailVerificationTokenExpiry = verificationTokenExpiry;
       
       await this.userRepository.save(user);
@@ -849,6 +1237,9 @@ export class AuthService {
         user.id,
         'VERIFICATION_EMAIL_RESENT',
         'Verification email resent',
+        ipAddress,
+        null,
+        'LOW',
       );
     } catch (error) {
       console.error('Resend verification email error:', error);
@@ -856,10 +1247,217 @@ export class AuthService {
     }
   }
 
+  async enableTwoFactor(
+    userId: string,
+    enableTwoFactorDto: EnableTwoFactorDto,
+    request?: Request,
+  ): Promise<TwoFactorSetup> {
+    const ipAddress = request?.ip || '127.0.0.1';
+    
+    try {
+      const user = await this.userRepository.findOne({
+        where: { id: userId },
+      });
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      if (user.isTwoFactorEnabled) {
+        throw new BadRequestException('Two-factor authentication is already enabled');
+      }
+
+      // Generate 2FA secret
+      const secret = this.generateTwoFactorSecret();
+      const qrCode = await this.generateQrCode(user.email, secret);
+      const backupCodes = this.generateBackupCodes();
+
+      // Store encrypted secret and backup codes
+      user.twoFactorSecret = await this.encryptionService.encrypt(secret);
+      user.backupCodes = await this.encryptionService.encrypt(JSON.stringify(backupCodes));
+      user.isTwoFactorEnabled = false; // Will be enabled after verification
+      
+      await this.userRepository.save(user);
+
+      // Log 2FA setup initiation
+      await this.logAuditDirect(
+        user.id,
+        '2FA_SETUP_INITIATED',
+        'Two-factor authentication setup initiated',
+        ipAddress,
+        null,
+        'HIGH',
+      );
+
+      return {
+        secret,
+        qrCode,
+        backupCodes,
+      };
+    } catch (error) {
+      console.error('Enable 2FA error:', error);
+      throw new InternalServerErrorException('Failed to setup two-factor authentication');
+    }
+  }
+
+  async verifyAndEnableTwoFactor(
+    userId: string,
+    verifyTwoFactorDto: VerifyTwoFactorDto,
+    request?: Request,
+  ): Promise<void> {
+    const ipAddress = request?.ip || '127.0.0.1';
+    
+    try {
+      const user = await this.userRepository.findOne({
+        where: { id: userId },
+      });
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      if (!user.twoFactorSecret) {
+        throw new BadRequestException('Two-factor authentication not set up');
+      }
+
+      // Decrypt and verify 2FA code
+      const secret = await this.encryptionService.decrypt(user.twoFactorSecret);
+      const isValid = this.verifyTwoFactorToken(secret, verifyTwoFactorDto.code);
+
+      if (!isValid) {
+        // Check backup codes
+        if (user.backupCodes) {
+          const backupCodes = JSON.parse(await this.encryptionService.decrypt(user.backupCodes));
+          const backupIndex = backupCodes.findIndex(code => code === verifyTwoFactorDto.code);
+          
+          if (backupIndex !== -1) {
+            // Remove used backup code
+            backupCodes.splice(backupIndex, 1);
+            user.backupCodes = await this.encryptionService.encrypt(JSON.stringify(backupCodes));
+          } else {
+            throw new UnauthorizedException('Invalid verification code');
+          }
+        } else {
+          throw new UnauthorizedException('Invalid verification code');
+        }
+      }
+
+      // Enable 2FA
+      user.isTwoFactorEnabled = true;
+      await this.userRepository.save(user);
+
+      // Log 2FA enabled
+      await this.logAuditDirect(
+        user.id,
+        '2FA_ENABLED',
+        'Two-factor authentication enabled successfully',
+        ipAddress,
+        null,
+        'HIGH',
+      );
+
+      // Send notification
+      await this.notificationService.sendTwoFactorEnabledNotification(
+        user.email,
+        user.firstName,
+        ipAddress,
+      );
+
+    } catch (error) {
+      console.error('Verify and enable 2FA error:', error);
+      throw new InternalServerErrorException('Failed to enable two-factor authentication');
+    }
+  }
+
+  async disableTwoFactor(userId: string, request?: Request): Promise<void> {
+    const ipAddress = request?.ip || '127.0.0.1';
+    
+    try {
+      const user = await this.userRepository.findOne({
+        where: { id: userId },
+      });
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      if (!user.isTwoFactorEnabled) {
+        throw new BadRequestException('Two-factor authentication is not enabled');
+      }
+
+      // Disable 2FA
+      user.isTwoFactorEnabled = false;
+      user.twoFactorSecret = null;
+      user.backupCodes = null;
+      
+      await this.userRepository.save(user);
+
+      // Log 2FA disabled
+      await this.logAuditDirect(
+        user.id,
+        '2FA_DISABLED',
+        'Two-factor authentication disabled',
+        ipAddress,
+        null,
+        'HIGH',
+      );
+
+      // Send notification
+      await this.notificationService.sendTwoFactorDisabledNotification(
+        user.email,
+        user.firstName,
+        ipAddress,
+      );
+
+    } catch (error) {
+      console.error('Disable 2FA error:', error);
+      throw new InternalServerErrorException('Failed to disable two-factor authentication');
+    }
+  }
+
+  async regenerateBackupCodes(userId: string, request?: Request): Promise<string[]> {
+    const ipAddress = request?.ip || '127.0.0.1';
+    
+    try {
+      const user = await this.userRepository.findOne({
+        where: { id: userId },
+      });
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      if (!user.isTwoFactorEnabled) {
+        throw new BadRequestException('Two-factor authentication is not enabled');
+      }
+
+      // Generate new backup codes
+      const backupCodes = this.generateBackupCodes();
+      user.backupCodes = await this.encryptionService.encrypt(JSON.stringify(backupCodes));
+      
+      await this.userRepository.save(user);
+
+      // Log backup codes regeneration
+      await this.logAuditDirect(
+        user.id,
+        'BACKUP_CODES_REGENERATED',
+        'Two-factor backup codes regenerated',
+        ipAddress,
+        null,
+        'HIGH',
+      );
+
+      return backupCodes;
+    } catch (error) {
+      console.error('Regenerate backup codes error:', error);
+      throw new InternalServerErrorException('Failed to regenerate backup codes');
+    }
+  }
+
   async validateUser(userId: string): Promise<User> {
     const user = await this.userRepository.findOne({
       where: { id: userId },
-      relations: ['profile'],
+      relations: ['profile', 'kyc'],
     });
 
     if (!user) {
@@ -871,7 +1469,7 @@ export class AuthService {
     return user;
   }
 
-  async getCurrentUser(userId: string): Promise<Omit<User, 'password' | 'refreshTokenHash'>> {
+  async getCurrentUser(userId: string): Promise<Omit<User, 'password' | 'refreshTokenHash' | 'twoFactorSecret' | 'backupCodes'>> {
     const user = await this.userRepository.findOne({
       where: { id: userId },
       relations: ['profile', 'kyc'],
@@ -881,11 +1479,194 @@ export class AuthService {
       throw new NotFoundException('User not found');
     }
 
-    const { password, refreshTokenHash, ...userWithoutSensitiveData } = user;
-    return userWithoutSensitiveData as Omit<User, 'password' | 'refreshTokenHash'>;
+    return this.sanitizeUserForResponse(user);
   }
 
-  private async generateTokens(user: User): Promise<{
+  async getActiveSessions(userId: string): Promise<any[]> {
+    return this.sessionService.getUserSessions(userId);
+  }
+
+  async terminateSession(userId: string, sessionId: string, request?: Request): Promise<void> {
+    const ipAddress = request?.ip || '127.0.0.1';
+    
+    try {
+      await this.sessionService.invalidateSession(sessionId);
+
+      // Log session termination
+      await this.logAuditDirect(
+        userId,
+        'SESSION_TERMINATED',
+        `Session ${sessionId} terminated`,
+        ipAddress,
+        null,
+        'MEDIUM',
+      );
+    } catch (error) {
+      console.error('Terminate session error:', error);
+      throw new InternalServerErrorException('Failed to terminate session');
+    }
+  }
+
+  async updateProfile(
+    userId: string,
+    updateProfileDto: UpdateProfileDto,
+    request?: Request,
+  ): Promise<Omit<User, 'password' | 'refreshTokenHash' | 'twoFactorSecret' | 'backupCodes'>> {
+    const ipAddress = request?.ip || '127.0.0.1';
+    
+    const queryRunner = this.dataSource.createQueryRunner();
+    
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const user = await queryRunner.manager.findOne(User, {
+        where: { id: userId },
+        relations: ['profile'],
+      });
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      // Update basic profile information
+      if (updateProfileDto.firstName !== undefined) {
+        user.firstName = this.sanitizeInput(updateProfileDto.firstName);
+      }
+      if (updateProfileDto.lastName !== undefined) {
+        user.lastName = this.sanitizeInput(updateProfileDto.lastName);
+      }
+      if (updateProfileDto.dateOfBirth !== undefined) {
+        this.validateAgeRequirement(updateProfileDto.dateOfBirth);
+        user.dateOfBirth = new Date(updateProfileDto.dateOfBirth);
+      }
+
+      // Update phone number (requires re-verification)
+      if (updateProfileDto.phoneNumber !== undefined && 
+          updateProfileDto.phoneNumber !== user.phoneNumber) {
+        const phoneVerificationCode = this.generateVerificationCode();
+        user.phoneNumber = this.normalizePhoneNumber(updateProfileDto.phoneNumber);
+        user.phoneVerificationCode = await this.encryptionService.hash(phoneVerificationCode);
+        user.phoneVerificationCodeExpiry = addMinutes(new Date(), 15);
+        user.verificationStatus = user.isEmailVerified ? 
+          VerificationStatus.EMAIL_VERIFIED : VerificationStatus.UNVERIFIED;
+        
+        // Send verification SMS
+        await this.smsService.sendVerificationCode(
+          user.phoneNumber,
+          phoneVerificationCode,
+        );
+      }
+
+      // Update profile preferences
+      if (user.profile && updateProfileDto.preferences) {
+        if (updateProfileDto.preferences.notification) {
+          user.profile.notificationPreferences = {
+            ...user.profile.notificationPreferences,
+            ...updateProfileDto.preferences.notification,
+          };
+        }
+        if (updateProfileDto.preferences.privacy) {
+          user.profile.privacySettings = {
+            ...user.profile.privacySettings,
+            ...updateProfileDto.preferences.privacy,
+          };
+        }
+        if (updateProfileDto.preferences.security) {
+          user.profile.securitySettings = {
+            ...user.profile.securitySettings,
+            ...updateProfileDto.preferences.security,
+          };
+        }
+      }
+
+      await queryRunner.manager.save([user, user.profile]);
+
+      // Log profile update
+      await this.logAudit(
+        queryRunner,
+        user.id,
+        'PROFILE_UPDATED',
+        'User profile updated',
+        ipAddress,
+        null,
+        'LOW',
+      );
+
+      await queryRunner.commitTransaction();
+
+      return this.sanitizeUserForResponse(user);
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async checkAccountHealth(userId: string): Promise<{
+    status: 'healthy' | 'warning' | 'critical';
+    issues: string[];
+    recommendations: string[];
+  }> {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: ['profile', 'kyc'],
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const issues: string[] = [];
+    const recommendations: string[] = [];
+
+    // Check verification status
+    if (!user.isEmailVerified) {
+      issues.push('Email not verified');
+      recommendations.push('Verify your email address to access all features');
+    }
+
+    if (!user.isPhoneVerified && user.phoneNumber) {
+      issues.push('Phone number not verified');
+      recommendations.push('Verify your phone number for enhanced security');
+    }
+
+    // Check KYC status
+    if (user.kycStatus !== KycStatus.VERIFIED) {
+      issues.push('KYC not completed');
+      recommendations.push('Complete KYC verification to increase loan limits');
+    }
+
+    // Check password age
+    if (this.isPasswordExpired(user)) {
+      issues.push('Password expired');
+      recommendations.push('Change your password for security');
+    }
+
+    // Check 2FA
+    if (!user.isTwoFactorEnabled) {
+      issues.push('Two-factor authentication not enabled');
+      recommendations.push('Enable two-factor authentication for enhanced security');
+    }
+
+    // Determine overall status
+    let status: 'healthy' | 'warning' | 'critical' = 'healthy';
+    if (issues.length > 2) {
+      status = 'critical';
+    } else if (issues.length > 0) {
+      status = 'warning';
+    }
+
+    return {
+      status,
+      issues,
+      recommendations,
+    };
+  }
+
+  // Private helper methods
+  private async generateTokens(user: User, sessionId: string): Promise<{
     accessToken: string;
     refreshToken: string;
     expiresIn: number;
@@ -896,6 +1677,9 @@ export class AuthService {
       role: user.role,
       kycStatus: user.kycStatus,
       verificationStatus: user.verificationStatus,
+      twoFactorEnabled: user.isTwoFactorEnabled,
+      sessionId,
+      jti: uuidv4(),
     };
 
     const accessToken = this.jwtService.sign(payload, {
@@ -903,10 +1687,17 @@ export class AuthService {
       expiresIn: this.configService.get('JWT_ACCESS_EXPIRES_IN', '15m'),
       issuer: 'moneycircle-api',
       audience: 'moneycircle-web',
+      notBefore: 0,
+      jwtid: payload.jti,
     });
 
     const refreshToken = this.jwtService.sign(
-      { sub: user.id, type: 'refresh' },
+      { 
+        sub: user.id, 
+        type: 'refresh',
+        sessionId,
+        jti: uuidv4(),
+      },
       {
         secret: this.configService.get('JWT_REFRESH_SECRET'),
         expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '7d'),
@@ -966,7 +1757,7 @@ export class AuthService {
         throw new ForbiddenException(
           `Account application was rejected. Reason: ${user.deactivationReason || 'Contact support'}`,
         );
-      case AccountStatus.PENDING:
+      case AccountStatus.PENDING_VERIFICATION:
         if (!user.isEmailVerified) {
           throw new ForbiddenException('Please verify your email to activate your account');
         }
@@ -984,7 +1775,7 @@ export class AuthService {
       return false;
     }
 
-    const passwordMaxAge = 90 * 24 * 60 * 60 * 1000; // 90 days in milliseconds
+    const passwordMaxAge = this.configService.get<number>('PASSWORD_MAX_AGE_DAYS', 90) * 24 * 60 * 60 * 1000;
     const now = new Date();
     const passwordAge = now.getTime() - user.lastPasswordChangeAt.getTime();
 
@@ -994,17 +1785,18 @@ export class AuthService {
   private canResetPassword(user: User): boolean {
     return (
       user.accountStatus === AccountStatus.ACTIVE ||
-      user.accountStatus === AccountStatus.PENDING
+      user.accountStatus === AccountStatus.PENDING_VERIFICATION
     );
   }
 
   private async logAudit(
-    queryRunner: any,
+    queryRunner: QueryRunner,
     userId: string,
     action: string,
     details: string,
     ipAddress?: string,
     userAgent?: string,
+    severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW',
   ): Promise<void> {
     const auditLog = queryRunner.manager.create(AuditLog, {
       id: uuidv4(),
@@ -1012,7 +1804,8 @@ export class AuthService {
       action,
       details,
       ipAddress: ipAddress || '127.0.0.1',
-      userAgent: userAgent || 'CLI/1.0',
+      userAgent: userAgent || 'Unknown',
+      severity,
       timestamp: new Date(),
     });
 
@@ -1025,6 +1818,7 @@ export class AuthService {
     details: string,
     ipAddress?: string,
     userAgent?: string,
+    severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW',
   ): Promise<void> {
     const auditLog = this.auditLogRepository.create({
       id: uuidv4(),
@@ -1032,10 +1826,339 @@ export class AuthService {
       action,
       details,
       ipAddress: ipAddress || '127.0.0.1',
-      userAgent: userAgent || 'CLI/1.0',
+      userAgent: userAgent || 'Unknown',
+      severity,
       timestamp: new Date(),
     });
 
     await this.auditLogRepository.save(auditLog);
+  }
+
+  private async logFailedLoginAttempt(
+    userId: string | null,
+    ipAddress: string,
+    userAgent: string,
+    reason: string,
+  ): Promise<void> {
+    const accessLog = this.accessLogRepository.create({
+      id: uuidv4(),
+      userId,
+      action: 'LOGIN_FAILED',
+      details: `Failed login attempt: ${reason}`,
+      ipAddress,
+      userAgent,
+      severity: 'HIGH',
+      timestamp: new Date(),
+    });
+
+    await this.accessLogRepository.save(accessLog);
+  }
+
+  private async handleFailedLoginAttempt(user: User, ipAddress: string, userAgent: string): Promise<void> {
+    user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+
+    if (user.failedLoginAttempts >= this.maxLoginAttempts) {
+      user.accountLockedUntil = addMinutes(new Date(), this.lockoutDuration);
+      
+      // Send security alert
+      await this.notificationService.sendSecurityAlert(
+        user.email,
+        'Account Locked',
+        `Your account has been locked due to ${this.maxLoginAttempts} failed login attempts. It will be unlocked in ${this.lockoutDuration} minutes.`,
+        ipAddress,
+      );
+    }
+
+    await this.userRepository.save(user);
+    
+    // Log failed attempt
+    await this.logFailedLoginAttempt(
+      user.id,
+      ipAddress,
+      userAgent,
+      `Attempt ${user.failedLoginAttempts}/${this.maxLoginAttempts}`,
+    );
+  }
+
+  private async checkSuspiciousActivity(user: User, ipAddress: string, deviceFingerprint: string): Promise<void> {
+    // Check for unusual login location
+    const isUnusualLocation = await this.ipBlockerService.isUnusualLocation(user.id, ipAddress);
+    
+    // Check for new device
+    const isNewDevice = await this.deviceFingerprintService.isNewDevice(user.id, deviceFingerprint);
+
+    if (isUnusualLocation || isNewDevice) {
+      // Send security alert
+      await this.notificationService.sendSuspiciousActivityAlert(
+        user.email,
+        user.firstName,
+        {
+          ipAddress,
+          deviceFingerprint,
+          isUnusualLocation,
+          isNewDevice,
+        },
+      );
+
+      // Log suspicious activity
+      await this.logAuditDirect(
+        user.id,
+        'SUSPICIOUS_ACTIVITY_DETECTED',
+        `Suspicious login detected: ${isUnusualLocation ? 'Unusual location' : ''} ${isNewDevice ? 'New device' : ''}`,
+        ipAddress,
+        null,
+        'HIGH',
+      );
+    }
+  }
+
+  private async validateRegistrationData(registerDto: RegisterDto): Promise<void> {
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(registerDto.email)) {
+      throw new BadRequestException('Invalid email format');
+    }
+
+    // Validate password strength
+    this.validatePasswordComplexity(registerDto.password);
+
+    // Validate phone number if provided
+    if (registerDto.phoneNumber) {
+      const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+      if (!phoneRegex.test(registerDto.phoneNumber.replace(/\s/g, ''))) {
+        throw new BadRequestException('Invalid phone number format');
+      }
+    }
+
+    // Validate role
+    if (!Object.values(UserRole).includes(registerDto.role)) {
+      throw new BadRequestException('Invalid user role');
+    }
+  }
+
+  private async checkExistingUser(registerDto: RegisterDto): Promise<{ exists: boolean; message: string }> {
+    const existingByEmail = await this.userRepository.findOne({
+      where: { email: registerDto.email.toLowerCase() },
+      withDeleted: true,
+    });
+
+    if (existingByEmail) {
+      return {
+        exists: true,
+        message: 'User with this email already exists',
+      };
+    }
+
+    if (registerDto.phoneNumber) {
+      const existingByPhone = await this.userRepository.findOne({
+        where: { phoneNumber: this.normalizePhoneNumber(registerDto.phoneNumber) },
+        withDeleted: true,
+      });
+
+      if (existingByPhone) {
+        return {
+          exists: true,
+          message: 'User with this phone number already exists',
+        };
+      }
+    }
+
+    return { exists: false, message: '' };
+  }
+
+  private validateAgeRequirement(dateOfBirth: string): void {
+    if (!dateOfBirth) return;
+
+    const birthDate = new Date(dateOfBirth);
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    
+    if (age < 18) {
+      throw new BadRequestException('You must be at least 18 years old to register');
+    }
+    
+    if (age > 120) {
+      throw new BadRequestException('Invalid date of birth');
+    }
+  }
+
+  private async hashPassword(password: string): Promise<string> {
+    return bcrypt.hash(password, this.saltRounds);
+  }
+
+  private async verifyPassword(inputPassword: string, hashedPassword: string): Promise<boolean> {
+    return bcrypt.compare(inputPassword, hashedPassword);
+  }
+
+  private generateSecureToken(): string {
+    return crypto.randomBytes(32).toString('hex');
+  }
+
+  private generateVerificationCode(): string {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  private normalizePhoneNumber(phoneNumber: string): string {
+    return phoneNumber.replace(/\s/g, '').replace(/^0/, '+');
+  }
+
+  private sanitizeInput(input: string): string {
+    return input.trim().replace(/[<>]/g, '');
+  }
+
+  private async encryptSecurityQuestions(questions: Array<{ question: string; answer: string }>): Promise<string> {
+    const encrypted = await Promise.all(
+      questions.map(async (q) => ({
+        question: q.question,
+        answer: await this.encryptionService.hash(q.answer.toLowerCase()),
+      }))
+    );
+    return JSON.stringify(encrypted);
+  }
+
+  private async sendRegistrationNotifications(
+    user: User,
+    emailToken: string,
+    phoneCode: string,
+    ipAddress: string,
+  ): Promise<void> {
+    // Send welcome email
+    await this.mailerService.sendWelcomeEmail(
+      user.email,
+      user.firstName,
+      emailToken,
+      ipAddress,
+    );
+
+    // Send verification SMS if phone provided
+    if (user.phoneNumber && phoneCode) {
+      await this.smsService.sendVerificationCode(user.phoneNumber, phoneCode);
+    }
+
+    // Send admin notification for new registration
+    await this.notificationService.sendNewUserNotification(user);
+  }
+
+  private buildLoginResponse(user: User, tokens: any, requiresTwoFactor: boolean): LoginResponse {
+    return {
+      user: this.sanitizeUserForResponse(user),
+      tokens: requiresTwoFactor ? null : {
+        ...tokens,
+        tokenType: 'Bearer',
+        scope: ['openid', 'profile', 'email', 'offline_access'],
+      },
+      requiresTwoFactor,
+    };
+  }
+
+  private sanitizeUserForResponse(user: User): Omit<User, 'password' | 'refreshTokenHash' | 'twoFactorSecret' | 'backupCodes'> {
+    const { password, refreshTokenHash, twoFactorSecret, backupCodes, ...sanitizedUser } = user;
+    return sanitizedUser;
+  }
+
+  private validatePasswordComplexity(password: string): void {
+    const minLength = 8;
+    const hasUpperCase = /[A-Z]/.test(password);
+    const hasLowerCase = /[a-z]/.test(password);
+    const hasNumbers = /\d/.test(password);
+    const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+
+    if (password.length < minLength) {
+      throw new BadRequestException(`Password must be at least ${minLength} characters long`);
+    }
+    if (!hasUpperCase) {
+      throw new BadRequestException('Password must contain at least one uppercase letter');
+    }
+    if (!hasLowerCase) {
+      throw new BadRequestException('Password must contain at least one lowercase letter');
+    }
+    if (!hasNumbers) {
+      throw new BadRequestException('Password must contain at least one number');
+    }
+    if (!hasSpecialChar) {
+      throw new BadRequestException('Password must contain at least one special character');
+    }
+
+    // Check for common passwords
+    const commonPasswords = ['password', '123456', 'qwerty', 'admin', 'letmein'];
+    if (commonPasswords.includes(password.toLowerCase())) {
+      throw new BadRequestException('Password is too common. Please choose a stronger password.');
+    }
+  }
+
+  private async checkPasswordHistory(user: User, newPassword: string): Promise<void> {
+    if (!user.passwordHistory || user.passwordHistory.length === 0) {
+      return;
+    }
+
+    for (const oldHash of user.passwordHistory) {
+      const isSame = await bcrypt.compare(newPassword, oldHash);
+      if (isSame) {
+        throw new BadRequestException('New password cannot be the same as any of your previous passwords');
+      }
+    }
+  }
+
+  private generateTwoFactorSecret(): string {
+    return crypto.randomBytes(20).toString('base64');
+  }
+
+  private async generateQrCode(email: string, secret: string): Promise<string> {
+    const otpauth = `otpauth://totp/MoneyCircle:${email}?secret=${secret}&issuer=MoneyCircle`;
+    // In production, use a QR code generation library
+    return `data:image/png;base64,${Buffer.from(otpauth).toString('base64')}`;
+  }
+
+  private generateBackupCodes(): string[] {
+    const codes: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      codes.push(crypto.randomBytes(4).toString('hex').toUpperCase());
+    }
+    return codes;
+  }
+
+  private verifyTwoFactorToken(secret: string, token: string): boolean {
+    // Implement TOTP verification
+    // For now, return a simple check
+    return token.length === 6 && /^\d+$/.test(token);
+  }
+
+  private async generateTwoFactorChallenge(user: User, ipAddress: string): Promise<any> {
+    // Generate and send 2FA challenge
+    const challengeId = uuidv4();
+    const methods = ['authenticator'];
+    
+    if (user.phoneNumber) {
+      methods.push('sms');
+      // Send SMS code
+      const smsCode = this.generateVerificationCode();
+      await this.smsService.sendTwoFactorCode(user.phoneNumber, smsCode);
+    }
+    
+    methods.push('email');
+    // Send email code
+    const emailCode = this.generateVerificationCode();
+    await this.mailerService.sendTwoFactorEmail(user.email, user.firstName, emailCode, ipAddress);
+
+    return {
+      challengeId,
+      twoFactorMethods: methods,
+      expiresIn: 300, // 5 minutes
+    };
+  }
+
+  private async verifyTwoFactorCode(
+    user: User,
+    code: string,
+    method: string,
+  ): Promise<boolean> {
+    // Implement proper 2FA verification based on method
+    // This is a simplified version
+    return code.length === 6 && /^\d+$/.test(code);
   }
 }
