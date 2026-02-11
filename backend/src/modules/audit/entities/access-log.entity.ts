@@ -44,7 +44,7 @@ export class AccessLog {
   @Column({ type: 'uuid', nullable: true })
   @IsOptional()
   @IsUUID('4')
-  userId: string;
+  userId: string | null;
 
   @ApiProperty({
     description: 'Action attempted',
@@ -72,12 +72,12 @@ export class AccessLog {
 
   @ApiPropertyOptional({
     description: 'User agent of the client',
-    example: 'Mozilla/5.0...',
+    example: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
   })
   @Column({ type: 'text', nullable: true })
   @IsOptional()
   @IsString()
-  userAgent: string;
+  userAgent: string | null;
 
   @ApiProperty({
     description: 'Severity level',
