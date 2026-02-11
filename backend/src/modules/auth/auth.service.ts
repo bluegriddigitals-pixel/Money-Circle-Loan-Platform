@@ -11,7 +11,7 @@
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, QueryRunner, Not, IsNull, In } from 'typeorm';
+import { Repository, DataSource, QueryRunner, Not, IsNull } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { ConfigService } from '@nestjs/config';
@@ -23,13 +23,12 @@ import {
   addHours,
   isBefore,
   differenceInMinutes,
-  differenceInDays,
 } from 'date-fns';
 import { Request } from 'express';
 import { createHash } from 'crypto';
 
 import { User, UserRole, AccountStatus, KycStatus, VerificationStatus } from '../user/entities/user.entity';
-import { UserProfile, RiskLevel } from '../user/entities/user-profile.entity';
+import { UserProfile } from '../user/entities/user-profile.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -76,9 +75,11 @@ interface LoginResponse {
     expiresIn: number;
     tokenType: string;
     scope: string[];
-  };
+  } | null;
   requiresTwoFactor: boolean;
   twoFactorMethods?: string[];
+  challengeId?: string;
+  expiresIn?: number;
 }
 
 interface TwoFactorSetup {
@@ -87,9 +88,14 @@ interface TwoFactorSetup {
   backupCodes: string[];
 }
 
+interface ClientInfo {
+  ipAddress?: string;
+  userAgent?: string;
+  deviceFingerprint?: string;
+}
+
 @Injectable()
 export class AuthService {
-  private readonly loginAttempts = new Map<string, { attempts: number; lockedUntil: Date }>();
   private readonly refreshTokenBlacklist = new Set<string>();
   
   constructor(
@@ -180,7 +186,6 @@ export class AuthService {
 
       // Create user with comprehensive data
       const user = queryRunner.manager.create(User, {
-        id: uuidv4(),
         email: registerDto.email.toLowerCase().trim(),
         password: hashedPassword,
         firstName: this.sanitizeInput(registerDto.firstName),
@@ -204,9 +209,12 @@ export class AuthService {
         dataProcessingConsent: registerDto.dataProcessingConsent || false,
         lastPasswordChangeAt: new Date(),
         passwordHistory: [await this.encryptionService.hash(hashedPassword)],
-        securityQuestions: registerDto.securityQuestions ? 
-          await this.encryptSecurityQuestions(registerDto.securityQuestions) : [],
       });
+
+      // Handle security questions if provided
+      if (registerDto.securityQuestions && registerDto.securityQuestions.length > 0) {
+        user.securityQuestions = await this.encryptSecurityQuestions(registerDto.securityQuestions);
+      }
 
       const savedUser = await queryRunner.manager.save(user);
 
@@ -215,7 +223,6 @@ export class AuthService {
       const creditScore = await this.riskService.calculateInitialCreditScore(savedUser, registerDto);
 
       const userProfile = queryRunner.manager.create(UserProfile, {
-        id: uuidv4(),
         user: savedUser,
         riskLevel: initialRiskAssessment.riskLevel,
         creditScore,
@@ -361,7 +368,7 @@ export class AuthService {
       // Find user with all relations
       const user = await this.userRepository.findOne({
         where: { email: loginDto.email.toLowerCase().trim() },
-        relations: ['profile', 'kyc', 'sessions'],
+        relations: ['profile'],
         select: ['id', 'email', 'password', 'firstName', 'lastName', 'role', 
                 'accountStatus', 'kycStatus', 'verificationStatus', 'twoFactorSecret',
                 'isTwoFactorEnabled', 'lastLoginAt', 'failedLoginAttempts', 
@@ -464,7 +471,8 @@ export class AuthService {
           tokens: null,
           requiresTwoFactor: true,
           twoFactorMethods,
-          ...challenge,
+          challengeId: challenge.challengeId,
+          expiresIn: challenge.expiresIn,
         };
       }
 
@@ -1457,7 +1465,7 @@ export class AuthService {
   async validateUser(userId: string): Promise<User> {
     const user = await this.userRepository.findOne({
       where: { id: userId },
-      relations: ['profile', 'kyc'],
+      relations: ['profile'],
     });
 
     if (!user) {
@@ -1472,7 +1480,7 @@ export class AuthService {
   async getCurrentUser(userId: string): Promise<Omit<User, 'password' | 'refreshTokenHash' | 'twoFactorSecret' | 'backupCodes'>> {
     const user = await this.userRepository.findOne({
       where: { id: userId },
-      relations: ['profile', 'kyc'],
+      relations: ['profile'],
     });
 
     if (!user) {
@@ -1611,7 +1619,7 @@ export class AuthService {
   }> {
     const user = await this.userRepository.findOne({
       where: { id: userId },
-      relations: ['profile', 'kyc'],
+      relations: ['profile'],
     });
 
     if (!user) {
@@ -1721,23 +1729,18 @@ export class AuthService {
   private parseExpiresIn(expiresIn: string): number {
     const match = expiresIn.match(/^(\d+)([smhd])$/);
     if (!match) {
-      return 900; // Default to 15 minutes in seconds
+      return 900;
     }
 
     const value = parseInt(match[1], 10);
     const unit = match[2];
 
     switch (unit) {
-      case 's':
-        return value;
-      case 'm':
-        return value * 60;
-      case 'h':
-        return value * 3600;
-      case 'd':
-        return value * 86400;
-      default:
-        return 900;
+      case 's': return value;
+      case 'm': return value * 60;
+      case 'h': return value * 3600;
+      case 'd': return value * 86400;
+      default: return 900;
     }
   }
 
@@ -1763,7 +1766,6 @@ export class AuthService {
         }
         break;
       case AccountStatus.ACTIVE:
-        // Account is active, proceed
         break;
       default:
         throw new ForbiddenException('Account status is invalid');
@@ -1799,7 +1801,6 @@ export class AuthService {
     severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW',
   ): Promise<void> {
     const auditLog = queryRunner.manager.create(AuditLog, {
-      id: uuidv4(),
       userId,
       action,
       details,
@@ -1821,7 +1822,6 @@ export class AuthService {
     severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW',
   ): Promise<void> {
     const auditLog = this.auditLogRepository.create({
-      id: uuidv4(),
       userId,
       action,
       details,
@@ -1841,7 +1841,6 @@ export class AuthService {
     reason: string,
   ): Promise<void> {
     const accessLog = this.accessLogRepository.create({
-      id: uuidv4(),
       userId,
       action: 'LOGIN_FAILED',
       details: `Failed login attempt: ${reason}`,
@@ -1860,7 +1859,6 @@ export class AuthService {
     if (user.failedLoginAttempts >= this.maxLoginAttempts) {
       user.accountLockedUntil = addMinutes(new Date(), this.lockoutDuration);
       
-      // Send security alert
       await this.notificationService.sendSecurityAlert(
         user.email,
         'Account Locked',
@@ -1871,7 +1869,6 @@ export class AuthService {
 
     await this.userRepository.save(user);
     
-    // Log failed attempt
     await this.logFailedLoginAttempt(
       user.id,
       ipAddress,
@@ -1881,14 +1878,10 @@ export class AuthService {
   }
 
   private async checkSuspiciousActivity(user: User, ipAddress: string, deviceFingerprint: string): Promise<void> {
-    // Check for unusual login location
     const isUnusualLocation = await this.ipBlockerService.isUnusualLocation(user.id, ipAddress);
-    
-    // Check for new device
     const isNewDevice = await this.deviceFingerprintService.isNewDevice(user.id, deviceFingerprint);
 
     if (isUnusualLocation || isNewDevice) {
-      // Send security alert
       await this.notificationService.sendSuspiciousActivityAlert(
         user.email,
         user.firstName,
@@ -1900,7 +1893,6 @@ export class AuthService {
         },
       );
 
-      // Log suspicious activity
       await this.logAuditDirect(
         user.id,
         'SUSPICIOUS_ACTIVITY_DETECTED',
@@ -1913,16 +1905,13 @@ export class AuthService {
   }
 
   private async validateRegistrationData(registerDto: RegisterDto): Promise<void> {
-    // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(registerDto.email)) {
       throw new BadRequestException('Invalid email format');
     }
 
-    // Validate password strength
     this.validatePasswordComplexity(registerDto.password);
 
-    // Validate phone number if provided
     if (registerDto.phoneNumber) {
       const phoneRegex = /^\+?[1-9]\d{1,14}$/;
       if (!phoneRegex.test(registerDto.phoneNumber.replace(/\s/g, ''))) {
@@ -1930,7 +1919,6 @@ export class AuthService {
       }
     }
 
-    // Validate role
     if (!Object.values(UserRole).includes(registerDto.role)) {
       throw new BadRequestException('Invalid user role');
     }
@@ -2011,14 +1999,14 @@ export class AuthService {
     return input.trim().replace(/[<>]/g, '');
   }
 
-  private async encryptSecurityQuestions(questions: Array<{ question: string; answer: string }>): Promise<string> {
-    const encrypted = await Promise.all(
+  private async encryptSecurityQuestions(questions: Array<{ question: string; answer: string }>): Promise<Array<{ question: string; answer: string; createdAt: Date }>> {
+    return Promise.all(
       questions.map(async (q) => ({
         question: q.question,
         answer: await this.encryptionService.hash(q.answer.toLowerCase()),
+        createdAt: new Date(),
       }))
     );
-    return JSON.stringify(encrypted);
   }
 
   private async sendRegistrationNotifications(
@@ -2027,7 +2015,6 @@ export class AuthService {
     phoneCode: string,
     ipAddress: string,
   ): Promise<void> {
-    // Send welcome email
     await this.mailerService.sendWelcomeEmail(
       user.email,
       user.firstName,
@@ -2035,12 +2022,10 @@ export class AuthService {
       ipAddress,
     );
 
-    // Send verification SMS if phone provided
     if (user.phoneNumber && phoneCode) {
       await this.smsService.sendVerificationCode(user.phoneNumber, phoneCode);
     }
 
-    // Send admin notification for new registration
     await this.notificationService.sendNewUserNotification(user);
   }
 
@@ -2084,7 +2069,6 @@ export class AuthService {
       throw new BadRequestException('Password must contain at least one special character');
     }
 
-    // Check for common passwords
     const commonPasswords = ['password', '123456', 'qwerty', 'admin', 'letmein'];
     if (commonPasswords.includes(password.toLowerCase())) {
       throw new BadRequestException('Password is too common. Please choose a stronger password.');
@@ -2110,7 +2094,6 @@ export class AuthService {
 
   private async generateQrCode(email: string, secret: string): Promise<string> {
     const otpauth = `otpauth://totp/MoneyCircle:${email}?secret=${secret}&issuer=MoneyCircle`;
-    // In production, use a QR code generation library
     return `data:image/png;base64,${Buffer.from(otpauth).toString('base64')}`;
   }
 
@@ -2123,32 +2106,27 @@ export class AuthService {
   }
 
   private verifyTwoFactorToken(secret: string, token: string): boolean {
-    // Implement TOTP verification
-    // For now, return a simple check
     return token.length === 6 && /^\d+$/.test(token);
   }
 
   private async generateTwoFactorChallenge(user: User, ipAddress: string): Promise<any> {
-    // Generate and send 2FA challenge
     const challengeId = uuidv4();
     const methods = ['authenticator'];
     
     if (user.phoneNumber) {
       methods.push('sms');
-      // Send SMS code
       const smsCode = this.generateVerificationCode();
       await this.smsService.sendTwoFactorCode(user.phoneNumber, smsCode);
     }
     
     methods.push('email');
-    // Send email code
     const emailCode = this.generateVerificationCode();
     await this.mailerService.sendTwoFactorEmail(user.email, user.firstName, emailCode, ipAddress);
 
     return {
       challengeId,
       twoFactorMethods: methods,
-      expiresIn: 300, // 5 minutes
+      expiresIn: 300,
     };
   }
 
@@ -2157,8 +2135,8 @@ export class AuthService {
     code: string,
     method: string,
   ): Promise<boolean> {
-    // Implement proper 2FA verification based on method
-    // This is a simplified version
     return code.length === 6 && /^\d+$/.test(code);
   }
 }
+
+export { TokenPayload, LoginResponse, TwoFactorSetup, ClientInfo };

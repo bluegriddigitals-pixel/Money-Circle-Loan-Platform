@@ -561,7 +561,6 @@ export class Loan {
   @Min(1)
   version: number;
 
-  // Relations
   // ============ MARKETPLACE RELATIONS ============
   @ApiPropertyOptional({
     description: 'Investments in this loan',
@@ -596,9 +595,7 @@ export class Loan {
     nullable: true,
     onDelete: 'SET NULL',
   })
-  @JoinColumn({ name: 'loanApplicationId' })
-  @ValidateNested()
-  @Type(() => LoanApplication)
+  @JoinColumn({ name: 'loanApplicationId' })  // Foreign key in loans table
   loanApplication: LoanApplication;
 
   @ApiPropertyOptional({

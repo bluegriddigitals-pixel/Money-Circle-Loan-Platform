@@ -6,15 +6,15 @@ import {
     UpdateDateColumn,
     DeleteDateColumn,
     ManyToOne,
+    OneToMany,
     JoinColumn,
     Index,
     BeforeInsert,
     BeforeUpdate,
     AfterInsert,
     AfterUpdate,
-    OneToMany,
 } from 'typeorm';
-import { Exclude, Expose, Transform, Type } from 'class-transformer';
+import { Exclude, Expose, Type } from 'class-transformer';
 import {
     ApiProperty,
     ApiPropertyOptional,
@@ -26,10 +26,8 @@ import {
     IsEnum,
     IsOptional,
     IsDate,
-    IsBoolean,
     IsUUID,
     IsNotEmpty,
-    IsPositive,
     Min,
     Max,
     IsInt,
@@ -39,7 +37,6 @@ import {
     MaxLength,
     MinLength,
 } from 'class-validator';
-import { v4 as uuidv4 } from 'uuid';
 import { DecimalColumn } from '../../../shared/decorators/decimal-column.decorator';
 import { Loan } from './loan.entity';
 import { LoanApplication } from './loan-application.entity';
@@ -942,8 +939,10 @@ export class LoanCollateral {
         description: 'Loan application associated with this collateral',
         type: () => LoanApplication,
     })
-    @OneToMany(() => LoanCollateral, (collateral) => collateral.loanApplication)
-    collaterals: LoanCollateral[];
+    @ManyToOne(() => LoanApplication, (application) => application.collaterals, {
+        onDelete: 'CASCADE',
+        nullable: true,
+    })
     @JoinColumn({ name: 'loanApplicationId' })
     @ValidateNested()
     @Type(() => LoanApplication)
@@ -953,7 +952,7 @@ export class LoanCollateral {
         description: 'Collateral documents',
         type: () => [LoanDocument],
     })
-    @OneToMany(() => LoanDocument, (document) => document.loan, {
+    @OneToMany(() => LoanDocument, (document) => document.collateral, {
         cascade: true,
     })
     @ValidateNested({ each: true })
@@ -1307,7 +1306,7 @@ export class LoanCollateral {
         }
 
         const lastInspection = new Date(this.lastInspectionDate);
-        let nextInspection = new Date(lastInspection);
+        const nextInspection = new Date(lastInspection);
 
         switch (this.inspectionSchedule) {
             case 'monthly':

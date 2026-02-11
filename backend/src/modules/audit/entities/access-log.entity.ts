@@ -15,21 +15,21 @@ import {
   IsObject,
 } from 'class-validator';
 
-export enum AuditSeverity {
+export enum AccessSeverity {
   LOW = 'LOW',
   MEDIUM = 'MEDIUM',
   HIGH = 'HIGH',
   CRITICAL = 'CRITICAL',
 }
 
-@Entity('audit_logs')
+@Entity('access_logs')
 @Index(['userId'])
 @Index(['action'])
-@Index(['severity'])
+@Index(['ipAddress'])
 @Index(['timestamp'])
-export class AuditLog {
+export class AccessLog {
   @ApiProperty({
-    description: 'Unique identifier for the audit log',
+    description: 'Unique identifier for the access log',
     example: '123e4567-e89b-12d3-a456-426614174000',
     readOnly: true,
   })
@@ -38,7 +38,7 @@ export class AuditLog {
   id: string;
 
   @ApiPropertyOptional({
-    description: 'User ID who performed the action',
+    description: 'User ID who attempted access',
     example: '123e4567-e89b-12d3-a456-426614174001',
   })
   @Column({ type: 'uuid', nullable: true })
@@ -47,8 +47,8 @@ export class AuditLog {
   userId: string;
 
   @ApiProperty({
-    description: 'Action performed',
-    example: 'USER_REGISTERED',
+    description: 'Action attempted',
+    example: 'LOGIN_FAILED',
   })
   @Column({ type: 'varchar', length: 100, nullable: false })
   @IsString()
@@ -56,18 +56,17 @@ export class AuditLog {
 
   @ApiProperty({
     description: 'Action details',
-    example: 'User registered with role: borrower',
+    example: 'Failed login attempt: Invalid credentials',
   })
   @Column({ type: 'text', nullable: false })
   @IsString()
   details: string;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     description: 'IP address of the client',
     example: '192.168.1.1',
   })
-  @Column({ type: 'varchar', length: 45, nullable: true })
-  @IsOptional()
+  @Column({ type: 'varchar', length: 45, nullable: false })
   @IsString()
   ipAddress: string;
 
@@ -82,22 +81,22 @@ export class AuditLog {
 
   @ApiProperty({
     description: 'Severity level',
-    enum: AuditSeverity,
-    example: AuditSeverity.LOW,
-    default: AuditSeverity.LOW,
+    enum: AccessSeverity,
+    example: AccessSeverity.HIGH,
+    default: AccessSeverity.MEDIUM,
   })
   @Column({
     type: 'enum',
-    enum: AuditSeverity,
-    default: AuditSeverity.LOW,
+    enum: AccessSeverity,
+    default: AccessSeverity.MEDIUM,
     nullable: false,
   })
-  @IsEnum(AuditSeverity)
-  severity: AuditSeverity;
+  @IsEnum(AccessSeverity)
+  severity: AccessSeverity;
 
   @ApiPropertyOptional({
     description: 'Additional metadata',
-    example: { resourceId: '123', resourceType: 'loan' },
+    example: { attemptCount: 3, lockoutTime: '2024-01-01T00:00:00Z' },
   })
   @Column({ type: 'jsonb', nullable: true })
   @IsOptional()
@@ -105,7 +104,7 @@ export class AuditLog {
   metadata: Record<string, any>;
 
   @ApiProperty({
-    description: 'Timestamp when the action occurred',
+    description: 'Timestamp when the access attempt occurred',
     readOnly: true,
   })
   @CreateDateColumn({ type: 'timestamp' })

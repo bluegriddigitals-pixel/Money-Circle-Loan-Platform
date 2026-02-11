@@ -365,9 +365,9 @@ export class LoanApplication {
 
     @OneToOne(() => Loan, (loan) => loan.loanApplication, {
         nullable: true,
-        onDelete: "SET NULL",
+        onDelete: 'SET NULL',
     })
-    @JoinColumn({ name: "loanId" })
+    @JoinColumn({ name: 'loanId' })  // This creates the foreign key column
     loan: Loan;
 
     @OneToMany(() => LoanDocument, (document) => document.loanApplication)
