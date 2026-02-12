@@ -1,5 +1,3 @@
-Here's a clean, simplified version of your MoneyCircle documentation:
-
 # MoneyCircle - P2P Lending Platform
 
 A secure platform connecting borrowers and lenders in South Africa with full regulatory compliance.
