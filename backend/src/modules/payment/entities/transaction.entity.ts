@@ -32,27 +32,13 @@ import { Loan } from '../../loan/entities/loan.entity';
 import { EscrowAccount } from './escrow-account.entity';
 import { PaymentMethod } from './payment-method.entity';
 
-export enum TransactionType {
-    DEPOSIT = 'deposit',
-    WITHDRAWAL = 'withdrawal',
-    TRANSFER_IN = 'transfer_in',
-    TRANSFER_OUT = 'transfer_out',
-    REFUND = 'refund',
-    FEE = 'fee',
-    INTEREST = 'interest',
-    DISBURSEMENT = 'disbursement',
-    REPAYMENT = 'repayment',
-}
-
-export enum TransactionStatus {
-    PENDING = 'pending',
-    PROCESSING = 'processing',
-    COMPLETED = 'completed',
-    FAILED = 'failed',
-    CANCELLED = 'cancelled',
-    REFUNDED = 'refunded',
-    DISPUTED = 'disputed',
-}
+// ============================================
+// IMPORT ENUMS FROM ENUMS FOLDER - NOT DEFINED HERE
+// ============================================
+import { 
+    TransactionType, 
+    TransactionStatus 
+} from '../enums/transaction.enum';
 
 @Entity('transactions')
 @Index(['transactionNumber'], { unique: true })
@@ -272,7 +258,7 @@ export class Transaction {
     @Exclude({ toPlainOnly: true })
     deletedAt: Date;
 
-    // Relations - FIXED: Removed the incorrect self-referencing OneToMany
+    // Relations
     @ManyToOne(() => Loan, (loan) => loan.transactions, {
         nullable: true,
         onDelete: 'SET NULL',

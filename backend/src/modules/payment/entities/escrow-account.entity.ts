@@ -38,22 +38,13 @@ import { Transaction } from './transaction.entity';
 import { Disbursement } from './disbursement.entity';
 import { PayoutRequest } from './payout-request.entity';
 
-export enum EscrowAccountType {
-  LOAN_DISBURSEMENT = 'loan_disbursement',
-  LOAN_REPAYMENT = 'loan_repayment',
-  COLLATERAL = 'collateral',
-  TAX_HOLDING = 'tax_holding',
-  FEES_HOLDING = 'fees_holding',
-  GENERAL = 'general',
-}
-
-export enum EscrowAccountStatus {
-  PENDING = 'pending',
-  ACTIVE = 'active',
-  SUSPENDED = 'suspended',
-  CLOSED = 'closed',
-  FROZEN = 'frozen',
-}
+// ============================================
+// IMPORT ENUMS FROM ENUMS FOLDER - NOT DEFINED HERE
+// ============================================
+import { 
+    EscrowAccountType, 
+    EscrowAccountStatus 
+} from '../enums/escrow.enum';
 
 @Entity('escrow_accounts')
 @Index(['accountNumber'], { unique: true })

@@ -20,12 +20,25 @@ import { TransferFundsDto } from './dto/transfer-funds.dto';
 import { ApprovePayoutDto } from './dto/approve-payout.dto';
 import { ScheduleDisbursementDto } from './dto/schedule-disbursement.dto';
 
-// Import enums
-import { TransactionStatus, TransactionType } from './enums/transaction.enum';
-import { EscrowAccountStatus, EscrowAccountType } from './enums/escrow.enum';
-import { PaymentMethodStatus } from './enums/payment-method.enum';
-import { PayoutRequestStatus, PayoutRequestType } from './enums/payout.enum';
-import { DisbursementStatus } from './enums/disbursement.enum';
+// Import enums ONLY from enums folder - THIS IS THE ONLY SOURCE OF ENUMS
+import { 
+    TransactionStatus, 
+    TransactionType 
+} from './enums/transaction.enum';
+import { 
+    EscrowAccountStatus, 
+    EscrowAccountType 
+} from './enums/escrow.enum';
+import { 
+    PaymentMethodStatus 
+} from './enums/payment-method.enum';
+import { 
+    PayoutRequestStatus, 
+    PayoutRequestType 
+} from './enums/payout.enum';
+import { 
+    DisbursementStatus 
+} from './enums/disbursement.enum';
 
 // Import missing services
 import { NotificationService } from '../notification/notification.service';
@@ -83,20 +96,22 @@ export class PaymentService {
             // Generate transaction number
             const transactionNumber = this.generateTransactionNumber();
 
-            // Create transaction with proper type handling
-            const transaction = this.transactionRepository.create({
+            // Create transaction entity instance - NOT an array
+            const transaction = new Transaction();
+            Object.assign(transaction, {
                 ...createTransactionDto,
                 transactionNumber,
-                type: createTransactionDto.type as any,
-                status: (createTransactionDto.status || TransactionStatus.PENDING) as any,
+                type: createTransactionDto.type,
+                status: createTransactionDto.status || TransactionStatus.PENDING,
             });
 
             // If transaction is related to an escrow account, update the balance
             if (createTransactionDto.escrowAccountId) {
-                const escrowAccount = await this.escrowAccountRepository.findOne({
-                    where: { id: createTransactionDto.escrowAccountId },
-                    lock: { mode: 'pessimistic_write' },
-                });
+                const escrowAccount = await this.escrowAccountRepository
+                    .createQueryBuilder('escrow')
+                    .setLock('pessimistic_write')
+                    .where('escrow.id = :id', { id: createTransactionDto.escrowAccountId })
+                    .getOne();
 
                 if (!escrowAccount) {
                     throw new NotFoundException('Escrow account not found');
@@ -125,6 +140,7 @@ export class PaymentService {
                 await queryRunner.manager.save(escrowAccount);
             }
 
+            // Save the transaction
             const savedTransaction = await queryRunner.manager.save(transaction);
 
             // If payment method is specified, update its usage
@@ -297,27 +313,29 @@ export class PaymentService {
         await queryRunner.startTransaction();
 
         try {
-            const originalTransaction = await this.transactionRepository.findOne({
-                where: { id: transactionId },
-                lock: { mode: 'pessimistic_write' },
-            });
+            const originalTransaction = await this.transactionRepository
+                .createQueryBuilder('transaction')
+                .setLock('pessimistic_write')
+                .where('transaction.id = :id', { id: transactionId })
+                .getOne();
 
             if (!originalTransaction) {
                 throw new NotFoundException('Transaction not found');
             }
 
-            if ((originalTransaction.status as any) !== TransactionStatus.COMPLETED) {
+            if (originalTransaction.status !== TransactionStatus.COMPLETED) {
                 throw new BadRequestException('Only completed transactions can be refunded');
             }
 
             // Create refund transaction
-            const refundTransaction = this.transactionRepository.create({
+            const refundTransaction = new Transaction();
+            Object.assign(refundTransaction, {
                 transactionNumber: `REF-${originalTransaction.transactionNumber}`,
                 loanId: originalTransaction.loanId,
                 escrowAccountId: originalTransaction.escrowAccountId,
                 paymentMethodId: originalTransaction.paymentMethodId,
-                type: TransactionType.REFUND as any,
-                status: TransactionStatus.PENDING as any,
+                type: TransactionType.REFUND,
+                status: TransactionStatus.PENDING,
                 amount: originalTransaction.amount,
                 currency: originalTransaction.currency,
                 description: `Refund for ${originalTransaction.transactionNumber}: ${reason || 'No reason provided'}`,
@@ -326,10 +344,10 @@ export class PaymentService {
                     originalTransactionNumber: originalTransaction.transactionNumber,
                     refundReason: reason,
                 },
-            } as any);
+            });
 
             // Update original transaction status
-            originalTransaction.status = TransactionStatus.REFUNDED as any;
+            originalTransaction.status = TransactionStatus.REFUNDED;
             originalTransaction.metadata = {
                 ...originalTransaction.metadata,
                 refundedAt: new Date(),
@@ -338,15 +356,16 @@ export class PaymentService {
 
             // If transaction was from escrow, return funds
             if (originalTransaction.escrowAccountId) {
-                const escrowAccount = await this.escrowAccountRepository.findOne({
-                    where: { id: originalTransaction.escrowAccountId },
-                    lock: { mode: 'pessimistic_write' },
-                });
+                const escrowAccount = await this.escrowAccountRepository
+                    .createQueryBuilder('escrow')
+                    .setLock('pessimistic_write')
+                    .where('escrow.id = :id', { id: originalTransaction.escrowAccountId })
+                    .getOne();
 
                 if (escrowAccount) {
-                    if ((originalTransaction.type as any) === TransactionType.WITHDRAWAL) {
+                    if (originalTransaction.type === TransactionType.WITHDRAWAL) {
                         escrowAccount.currentBalance += originalTransaction.amount;
-                    } else if ((originalTransaction.type as any) === TransactionType.DEPOSIT) {
+                    } else if (originalTransaction.type === TransactionType.DEPOSIT) {
                         escrowAccount.currentBalance -= originalTransaction.amount;
                     }
                     await queryRunner.manager.save(escrowAccount);
@@ -367,7 +386,7 @@ export class PaymentService {
                         reason,
                     });
 
-                    savedRefundTransaction.status = TransactionStatus.COMPLETED as any;
+                    savedRefundTransaction.status = TransactionStatus.COMPLETED;
                     savedRefundTransaction.metadata = {
                         ...savedRefundTransaction.metadata,
                         processorRefundedAt: new Date(),
@@ -395,12 +414,12 @@ export class PaymentService {
     // ============================================
 
     async createEscrowAccount(createEscrowAccountDto: CreateEscrowAccountDto): Promise<EscrowAccount> {
-        const escrowAccount = this.escrowAccountRepository.create(createEscrowAccountDto as any);
-
-        // Set initial balance
-        if (createEscrowAccountDto.initialAmount) {
-            escrowAccount.currentBalance = createEscrowAccountDto.initialAmount;
-        }
+        const escrowAccount = new EscrowAccount();
+        Object.assign(escrowAccount, {
+            ...createEscrowAccountDto,
+            currentBalance: createEscrowAccountDto.initialAmount || 0,
+            status: EscrowAccountStatus.ACTIVE
+        });
 
         const savedAccount = await this.escrowAccountRepository.save(escrowAccount);
 
@@ -440,7 +459,14 @@ export class PaymentService {
             throw new BadRequestException('Deposit amount must be positive');
         }
 
-        const escrowAccount = await this.getEscrowAccount(escrowAccountId);
+        // Get a SINGLE escrow account, not an array
+        const escrowAccount = await this.escrowAccountRepository.findOne({
+            where: { id: escrowAccountId }
+        });
+
+        if (!escrowAccount) {
+            throw new NotFoundException('Escrow account not found');
+        }
 
         if (escrowAccount.status !== EscrowAccountStatus.ACTIVE) {
             throw new BadRequestException('Escrow account is not active');
@@ -470,7 +496,14 @@ export class PaymentService {
             throw new BadRequestException('Withdrawal amount must be positive');
         }
 
-        const escrowAccount = await this.getEscrowAccount(escrowAccountId);
+        // Get a SINGLE escrow account, not an array
+        const escrowAccount = await this.escrowAccountRepository.findOne({
+            where: { id: escrowAccountId }
+        });
+
+        if (!escrowAccount) {
+            throw new NotFoundException('Escrow account not found');
+        }
 
         if (escrowAccount.status !== EscrowAccountStatus.ACTIVE) {
             throw new BadRequestException('Escrow account is not active');
@@ -506,15 +539,18 @@ export class PaymentService {
                 throw new BadRequestException('Cannot transfer to the same account');
             }
 
-            const fromAccount = await this.escrowAccountRepository.findOne({
-                where: { id: fromEscrowAccountId },
-                lock: { mode: 'pessimistic_write' },
-            });
+            // Get SINGLE accounts, not arrays
+            const fromAccount = await this.escrowAccountRepository
+                .createQueryBuilder('escrow')
+                .setLock('pessimistic_write')
+                .where('escrow.id = :id', { id: fromEscrowAccountId })
+                .getOne();
 
-            const toAccount = await this.escrowAccountRepository.findOne({
-                where: { id: toEscrowAccountId },
-                lock: { mode: 'pessimistic_write' },
-            });
+            const toAccount = await this.escrowAccountRepository
+                .createQueryBuilder('escrow')
+                .setLock('pessimistic_write')
+                .where('escrow.id = :id', { id: toEscrowAccountId })
+                .getOne();
 
             if (!fromAccount || !toAccount) {
                 throw new NotFoundException('One or both escrow accounts not found');
@@ -533,10 +569,11 @@ export class PaymentService {
             }
 
             // Create withdrawal from source
-            const fromTransaction = this.transactionRepository.create({
+            const fromTransaction = new Transaction();
+            Object.assign(fromTransaction, {
                 escrowAccountId: fromAccount.id,
-                type: TransactionType.TRANSFER as any,
-                status: TransactionStatus.COMPLETED as any,
+                type: TransactionType.TRANSFER,
+                status: TransactionStatus.COMPLETED,
                 amount,
                 currency: 'USD',
                 description: description || `Transfer to ${toAccount.accountNumber}`,
@@ -545,13 +582,14 @@ export class PaymentService {
                     transferType: 'internal',
                     direction: 'OUT',
                 },
-            } as any);
+            });
 
             // Create deposit to destination
-            const toTransaction = this.transactionRepository.create({
+            const toTransaction = new Transaction();
+            Object.assign(toTransaction, {
                 escrowAccountId: toAccount.id,
-                type: TransactionType.TRANSFER as any,
-                status: TransactionStatus.COMPLETED as any,
+                type: TransactionType.TRANSFER,
+                status: TransactionStatus.COMPLETED,
                 amount,
                 currency: 'USD',
                 description: description || `Transfer from ${fromAccount.accountNumber}`,
@@ -560,7 +598,7 @@ export class PaymentService {
                     transferType: 'internal',
                     direction: 'IN',
                 },
-            } as any);
+            });
 
             // Update balances
             fromAccount.currentBalance -= amount;
@@ -569,7 +607,7 @@ export class PaymentService {
             await queryRunner.manager.save(fromAccount);
             await queryRunner.manager.save(toAccount);
 
-            // FIXED: Save and use the saved transactions
+            // Save transactions and get the saved instances
             const savedFromTransaction = await queryRunner.manager.save(fromTransaction);
             const savedToTransaction = await queryRunner.manager.save(toTransaction);
 
@@ -577,7 +615,6 @@ export class PaymentService {
 
             this.logger.log(`Transferred ${amount} from ${fromAccount.accountNumber} to ${toAccount.accountNumber}`);
 
-            // FIXED: Return saved transactions, not the unsaved ones
             return {
                 fromTransaction: savedFromTransaction,
                 toTransaction: savedToTransaction
@@ -624,10 +661,11 @@ export class PaymentService {
     }
 
     async closeEscrowAccount(escrowAccountId: string, reason: string): Promise<EscrowAccount> {
-        const escrowAccount = await this.escrowAccountRepository.findOne({
-            where: { id: escrowAccountId },
-            lock: { mode: 'pessimistic_write' },
-        });
+        const escrowAccount = await this.escrowAccountRepository
+            .createQueryBuilder('escrow')
+            .setLock('pessimistic_write')
+            .where('escrow.id = :id', { id: escrowAccountId })
+            .getOne();
 
         if (!escrowAccount) {
             throw new NotFoundException('Escrow account not found');
@@ -657,7 +695,7 @@ export class PaymentService {
         // Create payment method instance
         const paymentMethod = new PaymentMethod();
         paymentMethod.userId = createPaymentMethodDto.userId;
-        paymentMethod.type = createPaymentMethodDto.type as any;
+        paymentMethod.type = createPaymentMethodDto.type;
         paymentMethod.lastFour = createPaymentMethodDto.lastFour;
         paymentMethod.name = createPaymentMethodDto.holderName;
         paymentMethod.bankName = createPaymentMethodDto.bankName;
@@ -668,12 +706,10 @@ export class PaymentService {
         paymentMethod.metadata = createPaymentMethodDto.metadata || {};
         paymentMethod.expiryMonth = createPaymentMethodDto.expiryMonth;
         paymentMethod.expiryYear = createPaymentMethodDto.expiryYear;
-
-        // FIXED: Use type assertion for enum values
-        paymentMethod.status = PaymentMethodStatus.PENDING as any;
+        paymentMethod.status = PaymentMethodStatus.PENDING;
         paymentMethod.isVerified = false;
 
-        const savedMethod = await this.paymentMethodRepository.save(paymentMethod as any);
+        const savedMethod = await this.paymentMethodRepository.save(paymentMethod);
 
         this.logger.log(`Payment method created for user ${createPaymentMethodDto.userId}`);
         return savedMethod;
@@ -781,15 +817,14 @@ export class PaymentService {
             throw new BadRequestException('Cannot deactivate default payment method');
         }
 
-        // FIXED: Use type assertion for enum value
-        paymentMethod.status = PaymentMethodStatus.INACTIVE as any;
+        paymentMethod.status = PaymentMethodStatus.INACTIVE;
         paymentMethod.metadata = {
             ...paymentMethod.metadata,
             deactivatedAt: new Date(),
             deactivationReason: reason,
         };
 
-        const updatedMethod = await this.paymentMethodRepository.save(paymentMethod as any);
+        const updatedMethod = await this.paymentMethodRepository.save(paymentMethod);
 
         this.logger.log(`Payment method ${paymentMethodId} deactivated: ${reason}`);
         return updatedMethod;
@@ -817,11 +852,12 @@ export class PaymentService {
 
         const requestNumber = this.generateRequestNumber();
 
-        const payoutRequest = this.payoutRequestRepository.create({
+        const payoutRequest = new PayoutRequest();
+        Object.assign(payoutRequest, {
             ...createPayoutRequestDto,
             requestNumber,
-            status: PayoutRequestStatus.PENDING as any,
-        } as any);
+            status: PayoutRequestStatus.PENDING,
+        });
 
         const savedRequest = await this.payoutRequestRepository.save(payoutRequest);
 
@@ -882,11 +918,12 @@ export class PaymentService {
         await queryRunner.startTransaction();
 
         try {
-            const payoutRequest = await this.payoutRequestRepository.findOne({
-                where: { id: payoutRequestId },
-                lock: { mode: 'pessimistic_write' },
-                relations: ['escrowAccount'],
-            });
+            const payoutRequest = await this.payoutRequestRepository
+                .createQueryBuilder('payout')
+                .setLock('pessimistic_write')
+                .where('payout.id = :id', { id: payoutRequestId })
+                .leftJoinAndSelect('payout.escrowAccount', 'escrowAccount')
+                .getOne();
 
             if (!payoutRequest) {
                 throw new NotFoundException('Payout request not found');
@@ -947,15 +984,14 @@ export class PaymentService {
         await queryRunner.startTransaction();
 
         try {
-            // FIXED: Use getPayoutRequest instead of getUserPayoutRequests
-            const payoutRequest = await this.getPayoutRequest(payoutRequestId);
-
-            // Need to get a fresh instance with lock for processing
-            const payoutRequestToProcess = await this.payoutRequestRepository.findOne({
-                where: { id: payoutRequestId },
-                lock: { mode: 'pessimistic_write' },
-                relations: ['escrowAccount', 'user'],
-            });
+            // Get SINGLE payout request, not an array
+            const payoutRequestToProcess = await this.payoutRequestRepository
+                .createQueryBuilder('payout')
+                .setLock('pessimistic_write')
+                .where('payout.id = :id', { id: payoutRequestId })
+                .leftJoinAndSelect('payout.escrowAccount', 'escrowAccount')
+                .leftJoinAndSelect('payout.user', 'user')
+                .getOne();
 
             if (!payoutRequestToProcess) {
                 throw new NotFoundException('Payout request not found');
@@ -1048,11 +1084,12 @@ export class PaymentService {
 
         const disbursementNumber = this.generateDisbursementNumber();
 
-        const disbursement = this.disbursementRepository.create({
+        const disbursement = new Disbursement();
+        Object.assign(disbursement, {
             ...createDisbursementDto,
             disbursementNumber,
-            status: DisbursementStatus.PENDING as any,
-        } as any);
+            status: DisbursementStatus.PENDING,
+        });
 
         const savedDisbursement = await this.disbursementRepository.save(disbursement);
 
@@ -1122,15 +1159,14 @@ export class PaymentService {
         await queryRunner.startTransaction();
 
         try {
-            // FIXED: Use getDisbursement instead of getLoanDisbursements
-            const disbursement = await this.getDisbursement(disbursementId);
-
-            // Need to get a fresh instance with lock for processing
-            const disbursementToProcess = await this.disbursementRepository.findOne({
-                where: { id: disbursementId },
-                lock: { mode: 'pessimistic_write' },
-                relations: ['loan', 'escrowAccount'],
-            });
+            // Get SINGLE disbursement, not an array
+            const disbursementToProcess = await this.disbursementRepository
+                .createQueryBuilder('disbursement')
+                .setLock('pessimistic_write')
+                .where('disbursement.id = :id', { id: disbursementId })
+                .leftJoinAndSelect('disbursement.loan', 'loan')
+                .leftJoinAndSelect('disbursement.escrowAccount', 'escrowAccount')
+                .getOne();
 
             if (!disbursementToProcess) {
                 throw new NotFoundException('Disbursement not found');
@@ -1214,7 +1250,7 @@ export class PaymentService {
         // Find disbursements scheduled for today
         const scheduledDisbursements = await this.disbursementRepository.find({
             where: {
-                status: DisbursementStatus.SCHEDULED as any,
+                status: DisbursementStatus.SCHEDULED,
                 scheduledDate: Between(today, tomorrow),
             },
         });
@@ -1240,7 +1276,7 @@ export class PaymentService {
         // Find approved payout requests that are ready for processing
         const pendingPayouts = await this.payoutRequestRepository.find({
             where: {
-                status: PayoutRequestStatus.APPROVED as any,
+                status: PayoutRequestStatus.APPROVED,
             },
             take: 100, // Process in batches
         });
