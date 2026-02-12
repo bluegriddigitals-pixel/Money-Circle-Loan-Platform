@@ -15,7 +15,7 @@ import {
   IsArray,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { EscrowAccountType, EscrowAccountStatus } from "../enums/escrow.enum";
+import { EscrowAccountType } from "../enums/escrow.enum";
 
 export class CreateEscrowAccountDto {
   @ApiPropertyOptional({

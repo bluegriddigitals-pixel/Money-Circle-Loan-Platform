@@ -38,7 +38,6 @@ import {
   Min,
   Max,
 } from 'class-validator';
-import { DecimalColumn } from '../../../shared/decorators/decimal-column.decorator';
 import { Loan } from './loan.entity';
 import { LoanApplication } from './loan-application.entity';
 import { LoanGuarantor } from './loan-guarantor.entity';

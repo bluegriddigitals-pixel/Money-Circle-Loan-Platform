@@ -48,6 +48,7 @@ import { LoanRepayment } from './loan-repayment.entity';
 import { Disbursement } from '../../payment/entities/disbursement.entity';
 import { EscrowAccount } from '../../payment/entities/escrow-account.entity';
 import { Investment } from '../../marketplace/entities/investment.entity';
+import { Transaction } from '../../payment/entities/transaction.entity';
 
 export enum LoanStatus {
   DRAFT = 'draft',
@@ -561,7 +562,18 @@ export class Loan {
   @Min(1)
   version: number;
 
-  // ============ MARKETPLACE RELATIONS ============
+  @ApiPropertyOptional({
+    description: 'Transactions for this loan',
+    type: () => [Transaction],
+  })
+  @OneToMany(() => Transaction, (transaction) => transaction.loan, {
+    cascade: true,
+    eager: false,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => Transaction)
+  transactions: Transaction[];
+
   @ApiPropertyOptional({
     description: 'Investments in this loan',
     type: () => [Investment],

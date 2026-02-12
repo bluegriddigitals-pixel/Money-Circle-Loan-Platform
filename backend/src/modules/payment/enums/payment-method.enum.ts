@@ -11,13 +11,12 @@ export enum PaymentMethodType {
 }
 
 export enum PaymentMethodStatus {
-  ACTIVE = 'active',
-  INACTIVE = 'inactive',
-  PENDING_VERIFICATION = 'pending_verification',
-  VERIFIED = 'verified',
-  EXPIRED = 'expired',
-  SUSPENDED = 'suspended',
-  FRAUDULENT = 'fraudulent',
+  ACTIVE = 'ACTIVE',
+  INACTIVE = 'INACTIVE',
+  PENDING = 'PENDING',  // Add this if missing
+  VERIFIED = 'VERIFIED',
+  EXPIRED = 'EXPIRED',
+  FAILED = 'FAILED',
 }
 
 export enum CardType {

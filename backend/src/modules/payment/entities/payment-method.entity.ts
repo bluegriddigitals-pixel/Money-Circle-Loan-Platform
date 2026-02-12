@@ -9,8 +9,6 @@ import {
   OneToMany,
   JoinColumn,
   Index,
-  BeforeInsert,
-  BeforeUpdate,
 } from 'typeorm';
 import { Exclude, Expose } from 'class-transformer';
 import {
@@ -30,7 +28,6 @@ import {
   Max,
   IsBoolean,
   IsObject,
-  IsCreditCard,
   MaxLength,
   IsEmail,
 } from 'class-validator';

@@ -26,10 +26,8 @@ import {
   IsUUID,
   IsNotEmpty,
   Min,
-  Max,
   IsObject,
   IsEmail,
-  MaxLength,
 } from 'class-validator';
 import { DecimalColumn } from '../../../shared/decorators/decimal-column.decorator';
 import { User } from '../../user/entities/user.entity';

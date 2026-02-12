@@ -12,7 +12,6 @@ import {
   IsPhoneNumber,
   IsObject,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 import { PayoutRequestType, PayoutMethod } from '../enums/payout.enum';
 
 export class CreatePayoutRequestDto {
@@ -110,6 +109,14 @@ export class CreatePayoutRequestDto {
   @IsString()
   internalReference?: string;
 
+  @ApiPropertyOptional({
+  description: 'Additional metadata',
+  example: { source: 'web', ipAddress: '192.168.1.1' },
+})
+@IsOptional()
+@IsObject()
+metadata?: Record<string, any>;
+  
   @ApiPropertyOptional({
     description: 'Supporting documents',
     example: [

@@ -12,7 +12,25 @@ export class PayoutService {
   ) {}
 
   async create(createPayoutRequestDto: CreatePayoutRequestDto): Promise<PayoutRequest> {
-    const payoutRequest = this.payoutRepository.create(createPayoutRequestDto);
+    // ✅ FIX: Create entity instance and manually assign properties
+    const payoutRequest = new PayoutRequest();
+    
+    // Map DTO to entity
+    payoutRequest.userId = createPayoutRequestDto.userId;
+    payoutRequest.escrowAccountId = createPayoutRequestDto.escrowAccountId;
+    payoutRequest.type = createPayoutRequestDto.type as any; // Type assertion to fix enum mismatch
+    payoutRequest.amount = createPayoutRequestDto.amount;
+    payoutRequest.payoutMethod = createPayoutRequestDto.payoutMethod as any;
+    payoutRequest.recipientName = createPayoutRequestDto.recipientName;
+    payoutRequest.recipientEmail = createPayoutRequestDto.recipientEmail;
+    payoutRequest.recipientPhone = createPayoutRequestDto.recipientPhone;
+    payoutRequest.paymentDetails = createPayoutRequestDto.paymentDetails;
+    payoutRequest.description = createPayoutRequestDto.description;
+    payoutRequest.metadata = createPayoutRequestDto.metadata;
+    
+    // Set initial status
+    payoutRequest.status = PayoutRequestStatus.PENDING;
+
     return this.payoutRepository.save(payoutRequest);
   }
 
@@ -39,22 +57,22 @@ export class PayoutService {
     
     switch (status) {
       case PayoutRequestStatus.APPROVED:
-        payout.approve(data.approvedBy, data.notes);
+        payout.approve(data?.approvedBy, data?.notes);
         break;
       case PayoutRequestStatus.REJECTED:
-        payout.reject(data.rejectedBy, data.reason);
+        payout.reject(data?.rejectedBy, data?.reason);
         break;
       case PayoutRequestStatus.PROCESSING:
         payout.startProcessing();
         break;
       case PayoutRequestStatus.COMPLETED:
-        payout.complete(data.transactionReference);
+        payout.complete(data?.transactionReference);
         break;
       case PayoutRequestStatus.FAILED:
-        payout.fail(data.reason);
+        payout.fail(data?.reason);
         break;
       case PayoutRequestStatus.CANCELLED:
-        payout.cancel(data.cancelledBy, data.reason);
+        payout.cancel(data?.cancelledBy, data?.reason);
         break;
     }
     

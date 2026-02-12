@@ -13,8 +13,7 @@ import {
   IsBoolean,
   IsObject,
 } from 'class-validator';
-import { Type } from 'class-transformer';
-import { PaymentMethodType, PaymentMethodStatus, CardType, AccountType } from "../enums/payment-method.enum";
+import { PaymentMethodType, CardType, AccountType } from "../enums/payment-method.enum";
 
 export class CreatePaymentMethodDto {
   @ApiProperty({
@@ -58,7 +57,7 @@ export class CreatePaymentMethodDto {
   @IsNotEmpty()
   @MinLength(4)
   @MaxLength(4)
-  lastFourDigits: string;
+  lastFour: string;  // ✅ FIXED: renamed from lastFourDigits to match entity
 
   @ApiProperty({
     description: 'Card/Account holder name',

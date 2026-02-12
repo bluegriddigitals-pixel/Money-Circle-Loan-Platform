@@ -5,11 +5,9 @@ import {
   IsEnum,
   IsOptional,
   IsUUID,
-  IsNotEmpty,
   Min,
   MaxLength,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 import { TransactionType, TransactionStatus } from '../enums/transaction.enum';
 
 export class CreateTransactionDto {
@@ -64,6 +62,14 @@ export class CreateTransactionDto {
   @Min(0)
   amount: number;
 
+  @ApiPropertyOptional({
+  description: 'ID of the user who initiated the transaction',
+  example: '123e4567-e89b-12d3-a456-426614174004',
+})
+@IsOptional()
+@IsUUID('4')
+userId?: string;
+  
   @ApiPropertyOptional({
     description: 'Transaction currency',
     example: 'USD',

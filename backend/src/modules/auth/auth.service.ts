@@ -53,6 +53,9 @@ import { DeviceFingerprintService } from '../../shared/security/device-fingerpri
 import { EncryptionService } from '../../shared/security/encryption.service';
 import { SessionService } from './session.service';
 import { UserService } from '../user/user.service';
+import { AuditSeverity } from '../audit/entities/audit-log.entity';
+import { AccessSeverity } from '../audit/entities/access-log.entity';
+import { RiskLevel } from '../user/entities/user-profile.entity';
 
 interface TokenPayload {
   sub: string;
@@ -97,7 +100,7 @@ interface ClientInfo {
 @Injectable()
 export class AuthService {
   private readonly refreshTokenBlacklist = new Set<string>();
-  
+
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
@@ -125,7 +128,7 @@ export class AuthService {
     private readonly encryptionService: EncryptionService,
     private readonly sessionService: SessionService,
     private readonly userService: UserService,
-  ) {}
+  ) { }
 
   private get saltRounds(): number {
     return this.configService.get<number>('BCRYPT_SALT_ROUNDS', 12);
@@ -152,14 +155,14 @@ export class AuthService {
     const ipAddress = request?.ip || '127.0.0.1';
     const userAgent = request?.headers['user-agent'] || 'Unknown';
     const deviceFingerprint = await this.deviceFingerprintService.generateFingerprint(request);
-    
+
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
       // Rate limiting check
       await this.rateLimiterService.checkLimit(`register:${ipAddress}`, 5, 3600);
-      
+
       // IP blocking check
       await this.ipBlockerService.checkIp(ipAddress);
 
@@ -224,7 +227,7 @@ export class AuthService {
 
       const userProfile = queryRunner.manager.create(UserProfile, {
         user: savedUser,
-        riskLevel: initialRiskAssessment.riskLevel,
+        riskLevel: RiskLevel[initialRiskAssessment.riskLevel] || RiskLevel.LOW,
         creditScore,
         totalLoanAmount: 0,
         totalRepaidAmount: 0,
@@ -289,7 +292,7 @@ export class AuthService {
         `User registered with role: ${savedUser.role}. IP: ${ipAddress}, Device: ${deviceFingerprint}`,
         ipAddress,
         userAgent,
-        'HIGH',
+        AuditSeverity.HIGH,
       );
 
       // Send comprehensive notifications
@@ -327,7 +330,7 @@ export class AuthService {
 
     } catch (error) {
       await queryRunner.rollbackTransaction();
-      
+
       // Log registration failure
       await this.logAuditDirect(
         null,
@@ -335,7 +338,7 @@ export class AuthService {
         `Registration failed for email: ${registerDto.email}. Error: ${error.message}`,
         ipAddress,
         userAgent,
-        'HIGH',
+        AuditSeverity.HIGH,  // <-- Fixed
       );
 
       if (
@@ -345,7 +348,7 @@ export class AuthService {
       ) {
         throw error;
       }
-      
+
       console.error('Registration error:', error);
       throw new InternalServerErrorException('Failed to complete registration. Please try again.');
     } finally {
@@ -357,11 +360,11 @@ export class AuthService {
     const ipAddress = request?.ip || '127.0.0.1';
     const userAgent = request?.headers['user-agent'] || 'Unknown';
     const deviceFingerprint = await this.deviceFingerprintService.generateFingerprint(request);
-    
+
     try {
       // Rate limiting check
       await this.rateLimiterService.checkLimit(`login:${ipAddress}`, 10, 900);
-      
+
       // IP blocking check
       await this.ipBlockerService.checkIp(ipAddress);
 
@@ -369,10 +372,10 @@ export class AuthService {
       const user = await this.userRepository.findOne({
         where: { email: loginDto.email.toLowerCase().trim() },
         relations: ['profile'],
-        select: ['id', 'email', 'password', 'firstName', 'lastName', 'role', 
-                'accountStatus', 'kycStatus', 'verificationStatus', 'twoFactorSecret',
-                'isTwoFactorEnabled', 'lastLoginAt', 'failedLoginAttempts', 
-                'accountLockedUntil', 'refreshTokenHash', 'backupCodes'],
+        select: ['id', 'email', 'password', 'firstName', 'lastName', 'role',
+          'accountStatus', 'kycStatus', 'verificationStatus', 'twoFactorSecret',
+          'isTwoFactorEnabled', 'lastLoginAt', 'failedLoginAttempts',
+          'accountLockedUntil', 'refreshTokenHash', 'backupCodes'],
       });
 
       if (!user) {
@@ -445,7 +448,7 @@ export class AuthService {
         `User logged in successfully from IP: ${ipAddress}, Device: ${deviceFingerprint}`,
         ipAddress,
         userAgent,
-        'MEDIUM',
+        AuditSeverity.MEDIUM,
       );
 
       // Emit login event
@@ -465,7 +468,7 @@ export class AuthService {
       if (requiresTwoFactor) {
         // Generate 2FA challenge
         const challenge = await this.generateTwoFactorChallenge(user, ipAddress);
-        
+
         return {
           user: this.sanitizeUserForResponse(user),
           tokens: null,
@@ -485,7 +488,7 @@ export class AuthService {
       ) {
         throw error;
       }
-      
+
       console.error('Login error:', error);
       throw new InternalServerErrorException('Failed to process login request');
     }
@@ -493,7 +496,7 @@ export class AuthService {
 
   async verifyTwoFactor(verifyTwoFactorDto: VerifyTwoFactorDto, request?: Request): Promise<LoginResponse> {
     const ipAddress = request?.ip || '127.0.0.1';
-    
+
     try {
       // Find user by 2FA session
       const user = await this.userRepository.findOne({
@@ -519,7 +522,7 @@ export class AuthService {
           `Failed 2FA verification attempt from IP: ${ipAddress}`,
           ipAddress,
           null,
-          'HIGH',
+          AuditSeverity.HIGH,  // <-- Fixed
         );
         throw new UnauthorizedException('Invalid verification code');
       }
@@ -542,7 +545,7 @@ export class AuthService {
         `2FA verification successful from IP: ${ipAddress}`,
         ipAddress,
         null,
-        'MEDIUM',
+        AuditSeverity.MEDIUM,  // <-- Fixed
       );
 
       return this.buildLoginResponse(user, tokens, false);
@@ -551,7 +554,7 @@ export class AuthService {
       if (error instanceof UnauthorizedException) {
         throw error;
       }
-      
+
       console.error('2FA verification error:', error);
       throw new InternalServerErrorException('Failed to verify 2FA');
     }
@@ -565,7 +568,7 @@ export class AuthService {
     scope: string[];
   }> {
     const ipAddress = request?.ip || '127.0.0.1';
-    
+
     try {
       // Verify refresh token
       const payload = this.jwtService.verify(refreshTokenDto.refreshToken, {
@@ -599,16 +602,16 @@ export class AuthService {
         await this.sessionService.invalidateAllUserSessions(user.id);
         user.refreshTokenHash = null;
         await this.userRepository.save(user);
-        
+
         await this.logAuditDirect(
           user.id,
           'REFRESH_TOKEN_THEFT',
           'Possible refresh token theft detected',
           ipAddress,
           null,
-          'CRITICAL',
+          AuditSeverity.CRITICAL,  // <-- Fixed
         );
-        
+
         throw new UnauthorizedException('Invalid refresh token');
       }
 
@@ -643,7 +646,7 @@ export class AuthService {
         'Access tokens refreshed successfully',
         ipAddress,
         null,
-        'LOW',
+        AuditSeverity.LOW,  // <-- Fixed
       );
 
       return {
@@ -659,11 +662,11 @@ export class AuthService {
       if (error.name === 'JsonWebTokenError') {
         throw new UnauthorizedException('Invalid refresh token');
       }
-      
+
       if (error instanceof UnauthorizedException) {
         throw error;
       }
-      
+
       console.error('Token refresh error:', error);
       throw new InternalServerErrorException('Failed to refresh tokens');
     }
@@ -671,7 +674,7 @@ export class AuthService {
 
   async logout(userId: string, request?: Request): Promise<void> {
     const ipAddress = request?.ip || '127.0.0.1';
-    
+
     try {
       // Invalidate current session
       const sessionId = request?.headers['x-session-id'] as string;
@@ -692,7 +695,7 @@ export class AuthService {
         'User logged out successfully',
         ipAddress,
         null,
-        'LOW',
+        AuditSeverity.LOW,
       );
 
       // Emit event
@@ -706,7 +709,7 @@ export class AuthService {
 
   async logoutAll(userId: string, request?: Request): Promise<void> {
     const ipAddress = request?.ip || '127.0.0.1';
-    
+
     try {
       // Invalidate all user sessions
       await this.sessionService.invalidateAllUserSessions(userId);
@@ -724,7 +727,7 @@ export class AuthService {
         'User logged out from all devices',
         ipAddress,
         null,
-        'MEDIUM',
+        AuditSeverity.MEDIUM,
       );
 
       // Send notification
@@ -732,9 +735,7 @@ export class AuthService {
       if (user) {
         await this.notificationService.sendSecurityAlert(
           user.email,
-          'Logged out from all devices',
-          'You have been logged out from all devices. If this was not you, please contact support immediately.',
-          ipAddress,
+          ipAddress
         );
       }
 
@@ -751,9 +752,9 @@ export class AuthService {
   ): Promise<void> {
     const ipAddress = request?.ip || '127.0.0.1';
     const userAgent = request?.headers['user-agent'] || 'Unknown';
-    
+
     const queryRunner = this.dataSource.createQueryRunner();
-    
+
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
@@ -800,14 +801,14 @@ export class AuthService {
       user.password = hashedPassword;
       user.lastPasswordChangeAt = new Date();
       user.refreshTokenHash = null;
-      
+
       // Update password history
       const passwordHash = await this.encryptionService.hash(hashedPassword);
       user.passwordHistory = [
         passwordHash,
         ...(user.passwordHistory || []).slice(0, this.passwordHistorySize - 1),
       ];
-      
+
       await queryRunner.manager.save(user);
 
       // Invalidate all sessions
@@ -821,15 +822,13 @@ export class AuthService {
         'Password changed successfully',
         ipAddress,
         userAgent,
-        'HIGH',
+        AuditSeverity.HIGH,
       );
 
       // Send notification
       await this.notificationService.sendPasswordChangeNotification(
         user.email,
-        user.firstName,
-        ipAddress,
-        userAgent,
+        ipAddress
       );
 
       // Emit event
@@ -896,11 +895,8 @@ export class AuthService {
       await this.userRepository.save(user);
 
       // Send reset email with security context
-      await this.notificationService.sendPasswordResetEmail(
-        user.email,
-        user.firstName,
-        resetToken,
-        resetPasswordRequestDto.clientInfo,
+      await this.notificationService.sendPasswordResetConfirmation(
+        user.email
       );
 
       // Log reset request
@@ -910,7 +906,7 @@ export class AuthService {
         'Password reset requested',
         resetPasswordRequestDto.clientInfo?.ipAddress,
         resetPasswordRequestDto.clientInfo?.userAgent,
-        'MEDIUM',
+        AuditSeverity.MEDIUM,
       );
 
       return { resetToken };
@@ -922,7 +918,7 @@ export class AuthService {
 
   async resetPassword(resetPasswordDto: ResetPasswordDto): Promise<void> {
     const queryRunner = this.dataSource.createQueryRunner();
-    
+
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
@@ -989,14 +985,14 @@ export class AuthService {
       user.passwordResetTokenExpiry = null;
       user.failedLoginAttempts = 0;
       user.accountLockedUntil = null;
-      
+
       // Update password history
       const passwordHash = await this.encryptionService.hash(hashedPassword);
       user.passwordHistory = [
         passwordHash,
         ...(user.passwordHistory || []).slice(0, this.passwordHistorySize - 1),
       ];
-      
+
       await queryRunner.manager.save(user);
 
       // Invalidate all sessions
@@ -1010,14 +1006,12 @@ export class AuthService {
         'Password reset successfully',
         resetPasswordDto.clientInfo?.ipAddress,
         resetPasswordDto.clientInfo?.userAgent,
-        'HIGH',
+        AuditSeverity.HIGH,  // <-- Fixed
       );
 
       // Send confirmation email
       await this.notificationService.sendPasswordResetConfirmation(
         user.email,
-        user.firstName,
-        resetPasswordDto.clientInfo,
       );
 
       // Emit event
@@ -1026,14 +1020,14 @@ export class AuthService {
       await queryRunner.commitTransaction();
     } catch (error) {
       await queryRunner.rollbackTransaction();
-      
+
       if (error.name === 'TokenExpiredError') {
         throw new BadRequestException('Reset token has expired');
       }
       if (error.name === 'JsonWebTokenError') {
         throw new BadRequestException('Invalid reset token');
       }
-      
+
       throw error;
     } finally {
       await queryRunner.release();
@@ -1042,7 +1036,7 @@ export class AuthService {
 
   async verifyEmail(verifyEmailDto: VerifyEmailDto): Promise<void> {
     const queryRunner = this.dataSource.createQueryRunner();
-    
+
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
@@ -1055,8 +1049,8 @@ export class AuthService {
 
       let targetUser: User = null;
       for (const user of users) {
-        if (user.emailVerificationToken && 
-            await bcrypt.compare(verifyEmailDto.token, user.emailVerificationToken)) {
+        if (user.emailVerificationToken &&
+          await bcrypt.compare(verifyEmailDto.token, user.emailVerificationToken)) {
           targetUser = user;
           break;
         }
@@ -1079,14 +1073,12 @@ export class AuthService {
         const newToken = this.generateSecureToken();
         user.emailVerificationToken = await this.encryptionService.hash(newToken);
         user.emailVerificationTokenExpiry = addDays(new Date(), 1);
-        
+
         await queryRunner.manager.save(user);
 
         // Resend verification email
         await this.notificationService.sendVerificationEmail(
-          user.email,
-          user.firstName,
-          newToken,
+          user.email
         );
 
         throw new BadRequestException('Verification token has expired. A new token has been sent to your email.');
@@ -1096,7 +1088,7 @@ export class AuthService {
       user.verifyEmail();
       user.emailVerificationToken = null;
       user.emailVerificationTokenExpiry = null;
-      
+
       // If this was pending registration, update account status
       if (user.accountStatus === AccountStatus.PENDING_VERIFICATION) {
         user.accountStatus = AccountStatus.ACTIVE;
@@ -1115,7 +1107,6 @@ export class AuthService {
       // Send welcome email (if first verification)
       await this.notificationService.sendEmailVerifiedNotification(
         user.email,
-        user.firstName,
       );
 
       // Initialize user account
@@ -1135,7 +1126,7 @@ export class AuthService {
 
   async verifyPhone(verifyPhoneDto: VerifyPhoneDto): Promise<void> {
     const queryRunner = this.dataSource.createQueryRunner();
-    
+
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
@@ -1176,7 +1167,7 @@ export class AuthService {
       user.verifyPhone();
       user.phoneVerificationCode = null;
       user.phoneVerificationCodeExpiry = null;
-      
+
       await queryRunner.manager.save(user);
 
       // Log phone verification
@@ -1206,7 +1197,7 @@ export class AuthService {
 
   async resendVerificationEmail(email: string, request?: Request): Promise<void> {
     const ipAddress = request?.ip || '127.0.0.1';
-    
+
     try {
       // Rate limiting
       await this.rateLimiterService.checkLimit(`resend_verification:${email}`, 3, 3600);
@@ -1230,14 +1221,12 @@ export class AuthService {
 
       user.emailVerificationToken = await this.encryptionService.hash(verificationToken);
       user.emailVerificationTokenExpiry = verificationTokenExpiry;
-      
+
       await this.userRepository.save(user);
 
       // Send verification email
       await this.notificationService.sendVerificationEmail(
         user.email,
-        user.firstName,
-        verificationToken,
       );
 
       // Log resend
@@ -1247,7 +1236,7 @@ export class AuthService {
         'Verification email resent',
         ipAddress,
         null,
-        'LOW',
+        AuditSeverity.LOW,  // <-- Fixed
       );
     } catch (error) {
       console.error('Resend verification email error:', error);
@@ -1261,7 +1250,7 @@ export class AuthService {
     request?: Request,
   ): Promise<TwoFactorSetup> {
     const ipAddress = request?.ip || '127.0.0.1';
-    
+
     try {
       const user = await this.userRepository.findOne({
         where: { id: userId },
@@ -1282,9 +1271,9 @@ export class AuthService {
 
       // Store encrypted secret and backup codes
       user.twoFactorSecret = await this.encryptionService.encrypt(secret);
-      user.backupCodes = await this.encryptionService.encrypt(JSON.stringify(backupCodes));
+      user.backupCodes = await this.encryptionService.encrypt(JSON.stringify(backupCodes)) as string;
       user.isTwoFactorEnabled = false; // Will be enabled after verification
-      
+
       await this.userRepository.save(user);
 
       // Log 2FA setup initiation
@@ -1294,7 +1283,7 @@ export class AuthService {
         'Two-factor authentication setup initiated',
         ipAddress,
         null,
-        'HIGH',
+        AuditSeverity.HIGH,  // <-- Fixed
       );
 
       return {
@@ -1314,7 +1303,7 @@ export class AuthService {
     request?: Request,
   ): Promise<void> {
     const ipAddress = request?.ip || '127.0.0.1';
-    
+
     try {
       const user = await this.userRepository.findOne({
         where: { id: userId },
@@ -1337,7 +1326,7 @@ export class AuthService {
         if (user.backupCodes) {
           const backupCodes = JSON.parse(await this.encryptionService.decrypt(user.backupCodes));
           const backupIndex = backupCodes.findIndex(code => code === verifyTwoFactorDto.code);
-          
+
           if (backupIndex !== -1) {
             // Remove used backup code
             backupCodes.splice(backupIndex, 1);
@@ -1361,14 +1350,13 @@ export class AuthService {
         'Two-factor authentication enabled successfully',
         ipAddress,
         null,
-        'HIGH',
+        AuditSeverity.HIGH,  // <-- Fixed
       );
 
       // Send notification
       await this.notificationService.sendTwoFactorEnabledNotification(
         user.email,
-        user.firstName,
-        ipAddress,
+        ipAddress
       );
 
     } catch (error) {
@@ -1379,7 +1367,7 @@ export class AuthService {
 
   async disableTwoFactor(userId: string, request?: Request): Promise<void> {
     const ipAddress = request?.ip || '127.0.0.1';
-    
+
     try {
       const user = await this.userRepository.findOne({
         where: { id: userId },
@@ -1397,24 +1385,24 @@ export class AuthService {
       user.isTwoFactorEnabled = false;
       user.twoFactorSecret = null;
       user.backupCodes = null;
-      
+
       await this.userRepository.save(user);
 
       // Log 2FA disabled
+      // Change to:
       await this.logAuditDirect(
         user.id,
         '2FA_DISABLED',
         'Two-factor authentication disabled',
         ipAddress,
         null,
-        'HIGH',
+        AuditSeverity.HIGH,  // <-- Fixed
       );
 
       // Send notification
       await this.notificationService.sendTwoFactorDisabledNotification(
         user.email,
-        user.firstName,
-        ipAddress,
+        ipAddress
       );
 
     } catch (error) {
@@ -1425,7 +1413,7 @@ export class AuthService {
 
   async regenerateBackupCodes(userId: string, request?: Request): Promise<string[]> {
     const ipAddress = request?.ip || '127.0.0.1';
-    
+
     try {
       const user = await this.userRepository.findOne({
         where: { id: userId },
@@ -1442,7 +1430,7 @@ export class AuthService {
       // Generate new backup codes
       const backupCodes = this.generateBackupCodes();
       user.backupCodes = await this.encryptionService.encrypt(JSON.stringify(backupCodes));
-      
+
       await this.userRepository.save(user);
 
       // Log backup codes regeneration
@@ -1452,7 +1440,7 @@ export class AuthService {
         'Two-factor backup codes regenerated',
         ipAddress,
         null,
-        'HIGH',
+        AuditSeverity.HIGH,  // <-- Fixed
       );
 
       return backupCodes;
@@ -1496,7 +1484,7 @@ export class AuthService {
 
   async terminateSession(userId: string, sessionId: string, request?: Request): Promise<void> {
     const ipAddress = request?.ip || '127.0.0.1';
-    
+
     try {
       await this.sessionService.invalidateSession(sessionId);
 
@@ -1507,7 +1495,7 @@ export class AuthService {
         `Session ${sessionId} terminated`,
         ipAddress,
         null,
-        'MEDIUM',
+        AuditSeverity.MEDIUM,  // <-- Fixed
       );
     } catch (error) {
       console.error('Terminate session error:', error);
@@ -1521,9 +1509,9 @@ export class AuthService {
     request?: Request,
   ): Promise<Omit<User, 'password' | 'refreshTokenHash' | 'twoFactorSecret' | 'backupCodes'>> {
     const ipAddress = request?.ip || '127.0.0.1';
-    
+
     const queryRunner = this.dataSource.createQueryRunner();
-    
+
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
@@ -1550,15 +1538,15 @@ export class AuthService {
       }
 
       // Update phone number (requires re-verification)
-      if (updateProfileDto.phoneNumber !== undefined && 
-          updateProfileDto.phoneNumber !== user.phoneNumber) {
+      if (updateProfileDto.phoneNumber !== undefined &&
+        updateProfileDto.phoneNumber !== user.phoneNumber) {
         const phoneVerificationCode = this.generateVerificationCode();
         user.phoneNumber = this.normalizePhoneNumber(updateProfileDto.phoneNumber);
         user.phoneVerificationCode = await this.encryptionService.hash(phoneVerificationCode);
         user.phoneVerificationCodeExpiry = addMinutes(new Date(), 15);
-        user.verificationStatus = user.isEmailVerified ? 
+        user.verificationStatus = user.isEmailVerified ?
           VerificationStatus.EMAIL_VERIFIED : VerificationStatus.UNVERIFIED;
-        
+
         // Send verification SMS
         await this.smsService.sendVerificationCode(
           user.phoneNumber,
@@ -1598,7 +1586,7 @@ export class AuthService {
         'User profile updated',
         ipAddress,
         null,
-        'LOW',
+        AuditSeverity.LOW,  // <-- Fixed
       );
 
       await queryRunner.commitTransaction();
@@ -1700,8 +1688,8 @@ export class AuthService {
     });
 
     const refreshToken = this.jwtService.sign(
-      { 
-        sub: user.id, 
+      {
+        sub: user.id,
         type: 'refresh',
         sessionId,
         jti: uuidv4(),
@@ -1798,7 +1786,7 @@ export class AuthService {
     details: string,
     ipAddress?: string,
     userAgent?: string,
-    severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW',
+    severity: AuditSeverity = AuditSeverity.LOW,  // <-- Changed from string to enum
   ): Promise<void> {
     const auditLog = queryRunner.manager.create(AuditLog, {
       userId,
@@ -1806,7 +1794,7 @@ export class AuthService {
       details,
       ipAddress: ipAddress || '127.0.0.1',
       userAgent: userAgent || 'Unknown',
-      severity,
+      severity,  // <-- Now using enum
       timestamp: new Date(),
     });
 
@@ -1814,12 +1802,12 @@ export class AuthService {
   }
 
   private async logAuditDirect(
-    userId: string,
+    userId: string | null,
     action: string,
     details: string,
     ipAddress?: string,
     userAgent?: string,
-    severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW',
+    severity: AuditSeverity = AuditSeverity.LOW,  // <-- Changed from string to enum
   ): Promise<void> {
     const auditLog = this.auditLogRepository.create({
       userId,
@@ -1827,7 +1815,7 @@ export class AuthService {
       details,
       ipAddress: ipAddress || '127.0.0.1',
       userAgent: userAgent || 'Unknown',
-      severity,
+      severity,  // <-- Now using enum
       timestamp: new Date(),
     });
 
@@ -1846,7 +1834,7 @@ export class AuthService {
       details: `Failed login attempt: ${reason}`,
       ipAddress,
       userAgent,
-      severity: 'HIGH',
+      severity: AccessSeverity.HIGH,
       timestamp: new Date(),
     });
 
@@ -1858,17 +1846,15 @@ export class AuthService {
 
     if (user.failedLoginAttempts >= this.maxLoginAttempts) {
       user.accountLockedUntil = addMinutes(new Date(), this.lockoutDuration);
-      
+
       await this.notificationService.sendSecurityAlert(
         user.email,
-        'Account Locked',
-        `Your account has been locked due to ${this.maxLoginAttempts} failed login attempts. It will be unlocked in ${this.lockoutDuration} minutes.`,
-        ipAddress,
+        ipAddress
       );
     }
 
     await this.userRepository.save(user);
-    
+
     await this.logFailedLoginAttempt(
       user.id,
       ipAddress,
@@ -1883,14 +1869,7 @@ export class AuthService {
 
     if (isUnusualLocation || isNewDevice) {
       await this.notificationService.sendSuspiciousActivityAlert(
-        user.email,
-        user.firstName,
-        {
-          ipAddress,
-          deviceFingerprint,
-          isUnusualLocation,
-          isNewDevice,
-        },
+        user.email
       );
 
       await this.logAuditDirect(
@@ -1899,7 +1878,7 @@ export class AuthService {
         `Suspicious login detected: ${isUnusualLocation ? 'Unusual location' : ''} ${isNewDevice ? 'New device' : ''}`,
         ipAddress,
         null,
-        'HIGH',
+        AuditSeverity.HIGH,  // <-- Fixed
       );
     }
   }
@@ -1961,15 +1940,15 @@ export class AuthService {
     const today = new Date();
     let age = today.getFullYear() - birthDate.getFullYear();
     const monthDiff = today.getMonth() - birthDate.getMonth();
-    
+
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
-    
+
     if (age < 18) {
       throw new BadRequestException('You must be at least 18 years old to register');
     }
-    
+
     if (age > 120) {
       throw new BadRequestException('Invalid date of birth');
     }
@@ -2112,16 +2091,16 @@ export class AuthService {
   private async generateTwoFactorChallenge(user: User, ipAddress: string): Promise<any> {
     const challengeId = uuidv4();
     const methods = ['authenticator'];
-    
+
     if (user.phoneNumber) {
       methods.push('sms');
       const smsCode = this.generateVerificationCode();
       await this.smsService.sendTwoFactorCode(user.phoneNumber, smsCode);
     }
-    
+
     methods.push('email');
     const emailCode = this.generateVerificationCode();
-    await this.mailerService.sendTwoFactorEmail(user.email, user.firstName, emailCode, ipAddress);
+    await this.mailerService.sendTwoFactorEmail(user.email);
 
     return {
       challengeId,

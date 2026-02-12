@@ -46,10 +46,18 @@ import { LoanGuarantor } from '../../loan/entities/loan-guarantor.entity';
 import { PaymentMethod } from '../../payment/entities/payment-method.entity';
 import { PayoutRequest } from '../../payment/entities/payout-request.entity';
 import { Investment } from '../../marketplace/entities/investment.entity';
+import { AmlAlert } from '../../compliance/entities/aml-alert.entity';
+import { SanctionScreening } from '../../compliance/entities/sanction-screening.entity';
+import { ComplianceCheck } from '../../compliance/entities/compliance-check.entity';
+import { Kyc } from '../../compliance/entities/kyc.entity';
+import { KycStatus } from '../../compliance/entities/kyc.entity';
+
+
 
 export enum UserRole {
   BORROWER = 'borrower',
   LENDER = 'lender',
+  ADMIN = 'admin',
   AUDITOR = 'auditor',
   TRANSACTION_ADMIN = 'transaction_admin',
   SYSTEM_ADMIN = 'system_admin',
@@ -63,31 +71,19 @@ export enum UserRole {
 }
 
 export enum AccountStatus {
-  PENDING_VERIFICATION = 'pending_verification',
-  ACTIVE = 'active',
-  SUSPENDED = 'suspended',
-  DEACTIVATED = 'deactivated',
-  UNDER_REVIEW = 'under_review',
-  REJECTED = 'rejected',
-  FROZEN = 'frozen',
-  RESTRICTED = 'restricted',
-}
-
-export enum KycStatus {
-  NOT_STARTED = 'not_started',
-  IN_PROGRESS = 'in_progress',
-  SUBMITTED = 'submitted',
-  VERIFIED = 'verified',
-  REJECTED = 'rejected',
-  EXPIRED = 'expired',
-  UNDER_REVIEW = 'under_review',
+  PENDING_VERIFICATION = 'PENDING_VERIFICATION',
+  ACTIVE = 'ACTIVE',
+  SUSPENDED = 'SUSPENDED',
+  DEACTIVATED = 'DEACTIVATED',
+  UNDER_REVIEW = 'UNDER_REVIEW',
+  REJECTED = 'REJECTED',
 }
 
 export enum VerificationStatus {
-  UNVERIFIED = 'unverified',
-  EMAIL_VERIFIED = 'email_verified',
-  PHONE_VERIFIED = 'phone_verified',
-  FULLY_VERIFIED = 'fully_verified',
+  UNVERIFIED = 'UNVERIFIED',
+  EMAIL_VERIFIED = 'EMAIL_VERIFIED',
+  PHONE_VERIFIED = 'PHONE_VERIFIED',
+  FULLY_VERIFIED = 'FULLY_VERIFIED',
 }
 
 export enum LoginMethod {
@@ -306,9 +302,8 @@ export class User {
   isTwoFactorEnabled: boolean;
 
   @ApiHideProperty()
-  @Column({ type: 'jsonb', nullable: true })
-  @Exclude({ toPlainOnly: true })
-  backupCodes: string[];
+  @Column({ nullable: true })
+  backupCodes: string
 
   @ApiPropertyOptional({
     description: 'Last login timestamp',
@@ -793,7 +788,7 @@ export class User {
   guarantors: LoanGuarantor[];
   // ========================================
 
-   // ============ PAYMENT RELATIONS ============
+  // ============ PAYMENT RELATIONS ============
   @ApiPropertyOptional({
     description: 'Payment methods for the user',
     type: () => [PaymentMethod],
@@ -832,6 +827,57 @@ export class User {
   @Type(() => Investment)
   investments: Investment[];
   // ========================================
+
+
+  // ============ COMPLIANCE RELATIONS ============
+  @ApiPropertyOptional({
+    description: 'KYC records for the user',
+    type: () => [Kyc],
+  })
+  @OneToMany(() => Kyc, (kyc) => kyc.user, {
+    cascade: true,
+    eager: false,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => Kyc)
+  kyc: Kyc[];
+
+  @ApiPropertyOptional({
+    description: 'Compliance checks for the user',
+    type: () => [ComplianceCheck],
+  })
+  @OneToMany(() => ComplianceCheck, (check) => check.user, {
+    cascade: true,
+    eager: false,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => ComplianceCheck)
+  complianceChecks: ComplianceCheck[];
+
+  @ApiPropertyOptional({
+    description: 'Sanction screenings for the user',
+    type: () => [SanctionScreening],
+  })
+  @OneToMany(() => SanctionScreening, (screening) => screening.user, {
+    cascade: true,
+    eager: false,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => SanctionScreening)
+  sanctionScreenings: SanctionScreening[];
+
+  @ApiPropertyOptional({
+    description: 'AML alerts for the user',
+    type: () => [AmlAlert],
+  })
+  @OneToMany(() => AmlAlert, (alert) => alert.user, {
+    cascade: true,
+    eager: false,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => AmlAlert)
+  amlAlerts: AmlAlert[];
+  // ==============================================
 
   // Computed properties (virtual fields)
   @ApiProperty({
@@ -882,7 +928,7 @@ export class User {
   @Expose()
   get isEmailVerified(): boolean {
     return this.verificationStatus === VerificationStatus.EMAIL_VERIFIED ||
-           this.verificationStatus === VerificationStatus.FULLY_VERIFIED;
+      this.verificationStatus === VerificationStatus.FULLY_VERIFIED;
   }
 
   @ApiProperty({
@@ -893,7 +939,7 @@ export class User {
   @Expose()
   get isPhoneVerified(): boolean {
     return this.verificationStatus === VerificationStatus.PHONE_VERIFIED ||
-           this.verificationStatus === VerificationStatus.FULLY_VERIFIED;
+      this.verificationStatus === VerificationStatus.FULLY_VERIFIED;
   }
 
   @ApiProperty({
@@ -914,16 +960,16 @@ export class User {
   @Expose()
   get age(): number | null {
     if (!this.dateOfBirth) return null;
-    
+
     const today = new Date();
     const birthDate = new Date(this.dateOfBirth);
     let age = today.getFullYear() - birthDate.getFullYear();
     const monthDiff = today.getMonth() - birthDate.getMonth();
-    
+
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
-    
+
     return age;
   }
 
@@ -945,7 +991,7 @@ export class User {
   @Expose()
   get accountAgeInDays(): number {
     if (!this.createdAt) return 0;
-    
+
     const today = new Date();
     const created = new Date(this.createdAt);
     const diffTime = Math.abs(today.getTime() - created.getTime());
@@ -1088,7 +1134,7 @@ export class User {
   @AfterInsert()
   async afterInsert() {
     console.log(`User created: ${this.email} (${this.id})`);
-    
+
     // Emit user created event
     // this.eventEmitter.emit('user.created', this);
   }
@@ -1096,7 +1142,7 @@ export class User {
   @AfterUpdate()
   async afterUpdate() {
     console.log(`User updated: ${this.email} (${this.id})`);
-    
+
     // Emit user updated event
     // this.eventEmitter.emit('user.updated', this);
   }
@@ -1104,7 +1150,7 @@ export class User {
   @AfterRemove()
   async afterRemove() {
     console.log(`User removed: ${this.email} (${this.id})`);
-    
+
     // Emit user deleted event
     // this.eventEmitter.emit('user.deleted', this);
   }

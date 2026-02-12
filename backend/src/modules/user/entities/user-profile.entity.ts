@@ -10,10 +10,10 @@ import {
 import { User } from "./user.entity";
 
 export enum RiskLevel {
-  LOW = "low",
-  MEDIUM = "medium",
-  HIGH = "high",
-  VERY_HIGH = "very_high",
+  LOW = 'LOW',
+  MEDIUM = 'MEDIUM',
+  HIGH = 'HIGH',
+  CRITICAL = 'CRITICAL'
 }
 
 @Entity("user_profiles")
@@ -68,14 +68,30 @@ export class UserProfile {
   })
   riskLevel: RiskLevel;
 
+  @Column({ type: 'jsonb', nullable: true })
+  privacySettings: {
+    profileVisibility: string;
+    activityVisibility: string;
+    searchVisibility: boolean;
+  };
+
+  @Column({ type: 'jsonb', nullable: true })
+  securitySettings: {
+    twoFactorEnabled: boolean;
+    biometricEnabled: boolean;
+    sessionTimeout: number;
+    loginAlerts: boolean;
+    unusualActivityAlerts: boolean;
+  };
+
+  @Column({ type: 'jsonb', default: { email: true, sms: false, push: true } })
+  notificationPreferences: Record<string, boolean>;
+
   @Column({ default: 50 })
   riskScore: number;
 
   @Column({ type: "timestamp", nullable: true })
   lastRiskAssessment: Date;
-
-  @Column({ type: "jsonb", default: { email: true, sms: false, push: true } })
-  notificationPreferences: Record<string, boolean>;
 
   @Column({ type: "jsonb", nullable: true })
   investmentPreferences: Record<string, any>;
