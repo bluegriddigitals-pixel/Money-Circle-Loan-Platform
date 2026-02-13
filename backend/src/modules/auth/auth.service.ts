@@ -27,7 +27,7 @@ import {
 import { Request } from 'express';
 import { createHash } from 'crypto';
 
-import { User, UserRole, AccountStatus, KycStatus, VerificationStatus } from '../user/entities/user.entity';
+import { User, UserRole, AccountStatus, VerificationStatus } from '../user/entities/user.entity';
 import { UserProfile } from '../user/entities/user-profile.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';

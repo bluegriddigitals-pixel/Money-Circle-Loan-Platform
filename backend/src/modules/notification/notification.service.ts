@@ -203,7 +203,6 @@ export class NotificationService {
         this.logger.log(`New user notification: ${user.email}`);
     }
 
-    // Add this method to NotificationService
     async sendPhoneVerifiedNotification(phoneNumber: string): Promise<void> {
         try {
             await this.smsService.sendMessage(

@@ -1,0 +1,15 @@
+export enum UserRole {
+  BORROWER = 'borrower',
+  LENDER = 'lender',
+  ADMIN = 'admin',
+  AUDITOR = 'auditor',
+  TRANSACTION_ADMIN = 'transaction_admin',
+  SYSTEM_ADMIN = 'system_admin',
+  COMPLIANCE_OFFICER = 'compliance_officer',
+  RISK_ANALYST = 'risk_analyst',
+  CUSTOMER_SUPPORT = 'customer_support',
+  FINANCIAL_ADVISOR = 'financial_advisor',
+  LEGAL_ADVISOR = 'legal_advisor',
+  PARTNER = 'partner',
+  AFFILIATE = 'affiliate',
+}

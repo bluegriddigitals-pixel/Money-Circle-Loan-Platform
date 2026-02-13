@@ -149,12 +149,12 @@ import { PlatformAnalytics } from "../../modules/analytics/entities/platform-ana
           migrations: [path.join(__dirname, '..', '..', 'migrations', '*.{js,ts}')],
           migrationsTableName: 'migrations_history',
           migrationsRun: configService.get<boolean>('DB_MIGRATIONS_RUN', true),
-          migrationsTransactionMode: 'each',
+          migrationsTransactionMode: 'each' as const, // Fixed type issue
           
           // Connection settings
           synchronize: configService.get<boolean>('DB_SYNCHRONIZE', !isProduction && !isTest),
           logging: configService.get<boolean>('DB_LOGGING', !isProduction),
-          logger: isProduction ? 'advanced-console' : 'debug',
+          logger: isProduction ? 'advanced-console' : 'debug' as any,
           maxQueryExecutionTime: configService.get<number>('DB_MAX_QUERY_TIME', 1000),
           
           // Connection pool
@@ -198,7 +198,7 @@ import { PlatformAnalytics } from "../../modules/analytics/entities/platform-ana
               password: configService.get<string>('DB_MASTER_PASSWORD') || configService.get<string>('DB_PASSWORD'),
               database: configService.get<string>('DB_MASTER_DATABASE') || configService.get<string>('DB_DATABASE'),
             },
-            slaves: configService.get<string>('DB_REPLICA_HOSTS', '').split(',').filter(Boolean).map((host, index) => ({
+            slaves: configService.get<string>('DB_REPLICA_HOSTS', '').split(',').filter(Boolean).map((host, _index) => ({ // Fixed unused variable
               host: host.trim(),
               port: configService.get<number>('DB_REPLICA_PORT', configService.get<number>('DB_PORT')),
               username: configService.get<string>('DB_REPLICA_USERNAME', configService.get<string>('DB_USERNAME')),
@@ -214,7 +214,7 @@ import { PlatformAnalytics } from "../../modules/analytics/entities/platform-ana
           // Entity metadata
           entitySkipConstructor: false,
           entityPrefix: configService.get<string>('DB_TABLE_PREFIX', ''),
-          relationLoadStrategy: 'query',
+          relationLoadStrategy: 'query' as const,
           
           // Drivers specific
           applicationName: 'MoneyCircle-Backend',
