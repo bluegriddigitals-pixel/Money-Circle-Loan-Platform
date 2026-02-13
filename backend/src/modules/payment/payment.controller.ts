@@ -19,10 +19,14 @@ export class PaymentController {
 
   // Transactions
   @Post('transactions')
-  @Roles(UserRole.BORROWER, UserRole.LENDER, UserRole.ADMIN)
-  async createTransaction(@Body() createTransactionDto: CreateTransactionDto, @Request() req) {
-    return this.paymentService.createTransaction(createTransactionDto, req.user.id);
-  }
+async createTransaction(@Body() createTransactionDto: CreateTransactionDto, @Request() req) {
+  // Combine into a single object
+  const data = {
+    ...createTransactionDto,
+    userId: req.user.id
+  };
+  return this.paymentService.createTransaction(data);
+}
 
   @Get('transactions')
   @Roles(UserRole.ADMIN, UserRole.AUDITOR)
@@ -84,10 +88,13 @@ export class PaymentController {
 
   // Payment Processing
   @Post('process')
-  @Roles(UserRole.BORROWER, UserRole.LENDER, UserRole.ADMIN)
-  async processPayment(@Body() processPaymentDto: ProcessPaymentDto, @Request() req) {
-    return this.paymentService.processPayment(processPaymentDto, req.user.id);
-  }
+async processPayment(@Body() processPaymentDto: ProcessPaymentDto, @Request() req) {
+  const data = {
+    ...processPaymentDto,
+    userId: req.user.id
+  };
+  return this.paymentService.processPayment(data);
+}
 
   @Post('refund/:transactionId')
   @Roles(UserRole.ADMIN, UserRole.TRANSACTION_ADMIN)
@@ -106,10 +113,13 @@ export class PaymentController {
 
   // Payouts
   @Post('payouts')
-  @Roles(UserRole.LENDER, UserRole.ADMIN)
-  async createPayoutRequest(@Body() createPayoutRequestDto: CreatePayoutRequestDto, @Request() req) {
-    return this.paymentService.createPayoutRequest(createPayoutRequestDto, req.user.id);
-  }
+async createPayoutRequest(@Body() createPayoutRequestDto: CreatePayoutRequestDto, @Request() req) {
+  const data = {
+    ...createPayoutRequestDto,
+    userId: req.user.id
+  };
+  return this.paymentService.createPayoutRequest(data);
+}
 
   @Get('payouts')
   @Roles(UserRole.ADMIN, UserRole.AUDITOR)
@@ -129,11 +139,12 @@ export class PaymentController {
     return this.paymentService.approvePayout(id, req.user.id);
   }
 
-  @Put('payouts/:id/process')
-  @Roles(UserRole.ADMIN, UserRole.TRANSACTION_ADMIN)
-  async processPayout(@Param('id') id: string) {
-    return this.paymentService.processPayout(id);
-  }
+  // TO THIS:
+@Put('payouts/:id/process')
+@Roles(UserRole.ADMIN, UserRole.TRANSACTION_ADMIN)
+async processPayout(@Param('id') id: string) {
+  return this.paymentService.processPayoutRequest(id);
+}
 
   @Put('payouts/:id/reject')
   @Roles(UserRole.ADMIN, UserRole.TRANSACTION_ADMIN)
@@ -143,10 +154,14 @@ export class PaymentController {
 
   // Payment Methods
   @Post('methods')
-  @Roles(UserRole.BORROWER, UserRole.LENDER)
-  async addPaymentMethod(@Body() data: any, @Request() req) {
-    return this.paymentService.addPaymentMethod(data, req.user.id);
-  }
+@Roles(UserRole.BORROWER, UserRole.LENDER)
+async createPaymentMethod(@Body() data: any, @Request() req) {
+  const paymentData = {
+    ...data,
+    userId: req.user.id
+  };
+  return this.paymentService.createPaymentMethod(paymentData);
+}
 
   @Get('methods')
   @Roles(UserRole.BORROWER, UserRole.LENDER)

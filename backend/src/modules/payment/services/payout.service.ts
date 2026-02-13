@@ -3,48 +3,47 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, Between, FindOptionsWhere } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 
-import { Transaction } from './entities/transaction.entity';
-import { EscrowAccount } from './entities/escrow-account.entity';
-import { PaymentMethod } from './entities/payment-method.entity';
-import { PayoutRequest } from './entities/payout-request.entity';
-import { Disbursement } from './entities/disbursement.entity';
-import { PaymentProcessorService } from './payment-processor.service';
+import { Transaction } from '../entities/transaction.entity';
+import { EscrowAccount } from '../entities/escrow-account.entity';
+import { PaymentMethod } from '../entities/payment-method.entity';
+import { PayoutRequest } from '../entities/payout-request.entity';
+import { Disbursement } from '../entities/disbursement.entity';
+import { PaymentProcessorService } from '../payment-processor.service';
 
-import { CreateTransactionDto } from './dto/create-transaction.dto';
-import { CreateEscrowAccountDto } from './dto/create-escrow-account.dto';
-import { CreatePaymentMethodDto } from './dto/create-payment-method.dto';
-import { CreatePayoutRequestDto } from './dto/create-payout-request.dto';
-import { CreateDisbursementDto } from './dto/create-disbursement.dto';
-import { ProcessPaymentDto } from './dto/process-payment.dto';
-import { TransferFundsDto } from './dto/transfer-funds.dto';
-import { ApprovePayoutDto } from './dto/approve-payout.dto';
-import { ScheduleDisbursementDto } from './dto/schedule-disbursement.dto';
+import { CreateTransactionDto } from '../dto/create-transaction.dto';
+import { CreateEscrowAccountDto } from '../dto/create-escrow-account.dto';
+import { CreatePaymentMethodDto } from '../dto/create-payment-method.dto';
+import { CreatePayoutRequestDto } from '../dto/create-payout-request.dto';
+import { CreateDisbursementDto } from '../dto/create-disbursement.dto';
+import { ProcessPaymentDto } from '../dto/process-payment.dto';
+import { TransferFundsDto } from '../dto/transfer-funds.dto';
+import { ApprovePayoutDto } from '../dto/approve-payout.dto';
+import { ScheduleDisbursementDto } from '../dto/schedule-disbursement.dto'
 
 import { 
     TransactionStatus, 
     TransactionType 
-} from './enums/transaction.enum';
+} from '../enums/transaction.enum';
 import { 
     EscrowAccountStatus, 
     EscrowAccountType 
-} from './enums/escrow.enum';
+} from '../enums/escrow.enum';
 import { 
     PaymentMethodStatus 
-} from './enums/payment-method.enum';
+} from '../enums/payment-method.enum';
 import { 
     PayoutRequestStatus, 
     PayoutRequestType 
-} from './enums/payout.enum';
+} from '../enums/payout.enum';
 import { 
     DisbursementStatus 
-} from './enums/disbursement.enum';
+} from '../enums/disbursement.enum';
 
-import { NotificationService } from '../notification/notification.service';
-import { LoanService } from '../loan/loan.service';
-
+import { NotificationService } from '../../notification/notification.service';
+import { LoanService } from '../../loan/loan.service';
 @Injectable()
-export class PaymentService {
-    private readonly logger = new Logger(PaymentService.name);
+export class PayoutService  {
+    private readonly logger = new Logger(PayoutService .name);
 
     constructor(
         @InjectRepository(Transaction)
@@ -1507,16 +1506,16 @@ export class PaymentService {
         };
     }
 
-    async calculateFees(amount: number, _transactionType: string): Promise<{ processingFee: number; tax: number; totalFees: number }> {
-        const processingFee = Math.max(2.5, amount * 0.029);
-        const tax = processingFee * 0.1;
+    async calculateFees(amount: number): Promise<{ processingFee: number; tax: number; totalFees: number }> {
+    const processingFee = Math.max(2.5, amount * 0.029);
+    const tax = processingFee * 0.1;
 
-        return {
-            processingFee: Math.round(processingFee * 100) / 100,
-            tax: Math.round(tax * 100) / 100,
-            totalFees: Math.round((processingFee + tax) * 100) / 100,
-        };
-    }
+    return {
+        processingFee: Math.round(processingFee * 100) / 100,
+        tax: Math.round(tax * 100) / 100,
+        totalFees: Math.round((processingFee + tax) * 100) / 100,
+    };
+}
 
     async healthCheck(): Promise<{ status: string; details: any }> {
         try {

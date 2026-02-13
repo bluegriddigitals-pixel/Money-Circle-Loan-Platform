@@ -30,7 +30,7 @@ import {
 import { DecimalColumn } from '../../../shared/decorators/decimal-column.decorator';
 import { Loan } from '../../loan/entities/loan.entity';
 import { EscrowAccount } from './escrow-account.entity';
-import { PaymentMethod } from './payment-method.entity';
+import { PaymentMethod } from './payment-method.entity';  // FIXED: Correct path
 
 // ============================================
 // IMPORT ENUMS FROM ENUMS FOLDER - NOT DEFINED HERE
@@ -278,7 +278,7 @@ export class Transaction {
         onDelete: 'SET NULL',
     })
     @JoinColumn({ name: 'paymentMethodId' })
-    paymentMethod: PaymentMethod;
+    paymentMethod: PaymentMethod;  // This property now exists
 
     // Lifecycle hooks
     @BeforeInsert()

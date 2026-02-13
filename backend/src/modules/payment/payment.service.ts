@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException, Logger } from '@nestjs/common';
+import { NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, Between, FindOptionsWhere } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
@@ -19,25 +19,25 @@ import { ProcessPaymentDto } from './dto/process-payment.dto';
 import { TransferFundsDto } from './dto/transfer-funds.dto';
 import { ApprovePayoutDto } from './dto/approve-payout.dto';
 import { ScheduleDisbursementDto } from './dto/schedule-disbursement.dto';
+import { Injectable, Logger } from '@nestjs/common';
 
-import { 
-    TransactionStatus, 
-    TransactionType 
+import {
+    TransactionStatus,
+    TransactionType
 } from './enums/transaction.enum';
-import { 
-    EscrowAccountStatus, 
-    EscrowAccountType 
+import {
+    EscrowAccountStatus,
+    EscrowAccountType
 } from './enums/escrow.enum';
-import { 
-    PaymentMethodStatus,
-    PaymentMethodType 
+import {
+    PaymentMethodStatus
 } from './enums/payment-method.enum';
-import { 
-    PayoutRequestStatus, 
-    PayoutRequestType 
+import {
+    PayoutRequestStatus,
+    PayoutRequestType
 } from './enums/payout.enum';
-import { 
-    DisbursementStatus 
+import {
+    DisbursementStatus
 } from './enums/disbursement.enum';
 
 import { NotificationService } from '../notification/notification.service';
@@ -45,8 +45,8 @@ import { LoanService } from '../loan/loan.service';
 import { UserService } from '../user/user.service';
 
 @Injectable()
-export class PaymentService {
-    private readonly logger = new Logger(PaymentService.name);
+export class PayoutService {
+    private readonly logger = new Logger(PayoutService .name);
 
     constructor(
         @InjectRepository(Transaction)
@@ -174,7 +174,7 @@ export class PaymentService {
             order: { createdAt: 'DESC' },
             relations: ['loan', 'escrowAccount', 'paymentMethod']
         });
-        
+
         return { data, total, page, limit };
     }
 
@@ -364,9 +364,12 @@ export class PaymentService {
 
                 if (escrowAccount) {
                     if (originalTransaction.type === TransactionType.WITHDRAWAL) {
-                        escrowAccount.currentBalance += originalTransaction.amount;
+
+                        escrowAccount.currentBalance = Number(escrowAccount.currentBalance) + Number(originalTransaction.amount);
+                        escrowAccount.availableBalance = Number(escrowAccount.availableBalance) + Number(originalTransaction.amount);
                     } else if (originalTransaction.type === TransactionType.DEPOSIT) {
-                        escrowAccount.currentBalance -= originalTransaction.amount;
+                        escrowAccount.currentBalance = Number(escrowAccount.currentBalance) - Number(originalTransaction.amount);
+                        escrowAccount.availableBalance = Number(escrowAccount.availableBalance) - Number(originalTransaction.amount);
                     }
                     await queryRunner.manager.save(escrowAccount);
                 }
@@ -418,7 +421,7 @@ export class PaymentService {
     async createEscrowAccount(createEscrowAccountDto: CreateEscrowAccountDto): Promise<EscrowAccount> {
         const escrowAccount = new EscrowAccount();
         const accountNumber = this.generateAccountNumber();
-        
+
         Object.assign(escrowAccount, {
             ...createEscrowAccountDto,
             accountNumber,
@@ -707,7 +710,7 @@ export class PaymentService {
         });
 
         const paymentMethod = new PaymentMethod();
-        
+
         paymentMethod.userId = createPaymentMethodDto.userId;
         paymentMethod.type = createPaymentMethodDto.type as any;
         paymentMethod.lastFour = createPaymentMethodDto.lastFour;
@@ -744,7 +747,7 @@ export class PaymentService {
 
     async getUserPaymentMethods(userId: string, includeInactive: boolean = false): Promise<PaymentMethod[]> {
         const where: FindOptionsWhere<PaymentMethod> = { userId };
-        
+
         if (!includeInactive) {
             where.status = PaymentMethodStatus.ACTIVE || PaymentMethodStatus.VERIFIED as any;
         }
@@ -811,7 +814,7 @@ export class PaymentService {
             verifiedAt: new Date(),
             verificationMethod,
         };
-        
+
         const updatedMethod = await this.paymentMethodRepository.save(paymentMethod);
 
         this.logger.log(`Payment method ${paymentMethodId} verified using ${verificationMethod}`);
@@ -848,11 +851,11 @@ export class PaymentService {
         const paymentMethod = await this.paymentMethodRepository.findOne({
             where: { id, userId }
         });
-        
+
         if (!paymentMethod) {
             throw new NotFoundException('Payment method not found');
         }
-        
+
         return this.deactivatePaymentMethod(id, 'Removed by user');
     }
 
@@ -982,7 +985,7 @@ export class PaymentService {
             payoutRequest.approvedBy = approvePayoutDto.approvedBy;
             payoutRequest.approvedAt = new Date();
             payoutRequest.approvalNotes = approvePayoutDto.notes;
-            
+
             await queryRunner.manager.save(payoutRequest);
 
             await queryRunner.commitTransaction();
@@ -1020,13 +1023,37 @@ export class PaymentService {
             rejectedAt: new Date(),
             rejectionReason: reason,
         };
-        
+
         const updatedRequest = await this.payoutRequestRepository.save(payoutRequest);
 
         await this.notificationService.sendPayoutRejectionNotification(updatedRequest);
 
         this.logger.log(`Payout request ${payoutRequest.requestNumber} rejected: ${reason}`);
         return updatedRequest;
+    }
+
+    async handleWebhook(provider: string, payload: any, signature: string): Promise<any> {
+        this.logger.log(`Handling webhook from ${provider}`);
+
+        try {
+            const event = await this.paymentProcessorService.parseWebhookEvent(
+                JSON.stringify(payload),
+                signature
+            );
+
+            await this.paymentProcessorService.handleWebhookEvent(event);
+
+            this.logger.debug(`Webhook processed: ${event.type || 'unknown'}`);
+
+            return {
+                received: true,
+                provider,
+                timestamp: new Date().toISOString()
+            };
+        } catch (error) {
+            this.logger.error(`Webhook handling failed: ${error.message}`);
+            throw new BadRequestException('Webhook processing failed');
+        }
     }
 
     async processPayoutRequest(payoutRequestId: string): Promise<{ payoutRequest: PayoutRequest; transaction?: Transaction }> {
@@ -1099,7 +1126,6 @@ export class PaymentService {
             }
 
             payoutRequestToProcess.status = PayoutRequestStatus.COMPLETED;
-            payoutRequestToProcess.processedAt = new Date();
             await queryRunner.manager.save(payoutRequestToProcess);
 
             await queryRunner.commitTransaction();
@@ -1174,7 +1200,7 @@ export class PaymentService {
 
         disbursement.status = DisbursementStatus.SCHEDULED;
         disbursement.scheduledDate = scheduleDisbursementDto.scheduledDate;
-        
+
         const updatedDisbursement = await this.disbursementRepository.save(disbursement);
 
         this.logger.log(`Disbursement ${disbursement.disbursementNumber} scheduled for ${scheduleDisbursementDto.scheduledDate}`);
@@ -1196,7 +1222,7 @@ export class PaymentService {
         if (notes) {
             disbursement.approvalNotes = notes;
         }
-        
+
         const updatedDisbursement = await this.disbursementRepository.save(disbursement);
 
         await this.notificationService.sendDisbursementApprovalNotification(updatedDisbursement);
@@ -1223,7 +1249,7 @@ export class PaymentService {
                 throw new NotFoundException('Disbursement not found');
             }
 
-            if (disbursementToProcess.status !== DisbursementStatus.APPROVED && 
+            if (disbursementToProcess.status !== DisbursementStatus.APPROVED &&
                 disbursementToProcess.status !== DisbursementStatus.SCHEDULED) {
                 throw new BadRequestException(`Disbursement cannot be processed with status: ${disbursementToProcess.status}`);
             }
@@ -1253,13 +1279,13 @@ export class PaymentService {
             disbursementToProcess.disbursedAmount = (disbursementToProcess.disbursedAmount || 0) + disbursementAmount;
             disbursementToProcess.disbursedAt = new Date();
             disbursementToProcess.transactionReference = transaction?.transactionReference;
-            
+
             if (disbursementToProcess.disbursedAmount >= disbursementToProcess.amount) {
                 disbursementToProcess.status = DisbursementStatus.COMPLETED;
             } else {
                 disbursementToProcess.status = DisbursementStatus.PARTIAL;
             }
-            
+
             await queryRunner.manager.save(disbursementToProcess);
 
             if (disbursementToProcess.loan) {
@@ -1294,7 +1320,7 @@ export class PaymentService {
             ...installment,
             status: index === 0 ? 'pending' : 'scheduled',
         }));
-        
+
         const updatedDisbursement = await this.disbursementRepository.save(disbursement);
 
         this.logger.log(`Schedule created for disbursement ${disbursement.disbursementNumber} with ${installments.length} installments`);
@@ -1471,8 +1497,8 @@ export class PaymentService {
             monthlyTransactions,
             yearlyVolume: yearlyVolume?.total || 0,
             successRate: Math.round((successRate?.rate || 0) * 100) / 100,
-            averageTransactionSize: totalTransactions > 0 
-                ? (yearlyVolume?.total || 0) / totalTransactions 
+            averageTransactionSize: totalTransactions > 0
+                ? (yearlyVolume?.total || 0) / totalTransactions
                 : 0
         };
     }
@@ -1516,8 +1542,17 @@ export class PaymentService {
         };
     }
 
-    async calculateFees(amount: number, _transactionType: string): Promise<{ processingFee: number; tax: number; totalFees: number }> {
-        const processingFee = Math.max(2.5, amount * 0.029);
+    async calculateFees(amount: number, transactionType: string): Promise<{ processingFee: number; tax: number; totalFees: number }> {
+        // Use transactionType to adjust fees based on transaction type
+        let feePercentage = 0.029; // default 2.9%
+
+        if (transactionType === 'WITHDRAWAL') {
+            feePercentage = 0.025; // 2.5% for withdrawals
+        } else if (transactionType === 'REFUND') {
+            feePercentage = 0; // no fee for refunds
+        }
+
+        const processingFee = Math.max(2.5, amount * feePercentage);
         const tax = processingFee * 0.1;
 
         return {

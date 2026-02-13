@@ -4,7 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { addTransactionalDataSource } from 'typeorm-transactional';
 import * as path from 'path';
-import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
+import { DefaultNamingStrategy } from 'typeorm';
 
 // User Module Entities
 import { User } from '../../modules/user/entities/user.entity';
@@ -77,173 +77,173 @@ import { PlatformAnalytics } from "../../modules/analytics/entities/platform-ana
 
 @Global()
 @Module({
-  imports: [
-    TypeOrmModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService) => {
-        const logger = new Logger('DatabaseModule');
-        const isProduction = configService.get('NODE_ENV') === 'production';
-        const isTest = configService.get('NODE_ENV') === 'test';
-        
-        const dbConfig = {
-          type: 'postgres' as const,
-          host: configService.get<string>('DB_HOST', 'localhost'),
-          port: configService.get<number>('DB_PORT', 5432),
-          username: configService.get<string>('DB_USERNAME', 'postgres'),
-          password: configService.get<string>('DB_PASSWORD', 'postgres'),
-          database: configService.get<string>('DB_DATABASE', 'moneycircle'),
-          
-          // All entities
-          entities: [
-            User,
-            UserProfile,
-            Loan,
-            LoanApplication,
-            LoanRepayment,
-            LoanDocument,
-            LoanCollateral,
-            LoanGuarantor,
-            Transaction,
-            EscrowAccount,
-            PaymentMethod,
-            PayoutRequest,
-            Disbursement,
-            Investment,
-            Listing,
-            Bid,
-            InvestmentPortfolio,
-            AutoInvestRule,
-            Notification,
-            NotificationPreference,
-            EmailTemplate,
-            SmsLog,
-            AuditLog,
-            SystemLog,
-            AccessLog,
-            Kyc,
-            KycDocument,
-            ComplianceCheck,
-            SanctionScreening,
-            AmlAlert,
-            RiskAssessment,
-            CreditScore,
-            RiskFactor,
-            FraudDetection,
-            BehavioralAnalysis,
-            SystemConfig,
-            AdminUser,
-            AdminAction,
-            SystemMaintenance,
-            ApiKey,
-            FinancialReport,
-            UserReport,
-            LoanReport,
-            RiskReport,
-            UserAnalytics,
-            LoanAnalytics,
-            PlatformAnalytics,
-          ],
-          
-          // Migrations
-          migrations: [path.join(__dirname, '..', '..', 'migrations', '*.{js,ts}')],
-          migrationsTableName: 'migrations_history',
-          migrationsRun: configService.get<boolean>('DB_MIGRATIONS_RUN', true),
-          migrationsTransactionMode: 'each' as const, // Fixed type issue
-          
-          // Connection settings
-          synchronize: configService.get<boolean>('DB_SYNCHRONIZE', !isProduction && !isTest),
-          logging: configService.get<boolean>('DB_LOGGING', !isProduction),
-          logger: isProduction ? 'advanced-console' : 'debug' as any,
-          maxQueryExecutionTime: configService.get<number>('DB_MAX_QUERY_TIME', 1000),
-          
-          // Connection pool
-          poolSize: configService.get<number>('DB_POOL_SIZE', 10),
-          extra: {
-            connectionTimeoutMillis: configService.get<number>('DB_CONNECTION_TIMEOUT', 5000),
-            idleTimeoutMillis: configService.get<number>('DB_IDLE_TIMEOUT', 30000),
-            max: configService.get<number>('DB_MAX_CONNECTIONS', 20),
-          },
-          
-          // Naming strategy
-          namingStrategy: new SnakeNamingStrategy(),
-          
-          // SSL for production
-          ssl: isProduction ? {
-            rejectUnauthorized: false,
-            ca: configService.get<string>('DB_SSL_CA'),
-            key: configService.get<string>('DB_SSL_KEY'),
-            cert: configService.get<string>('DB_SSL_CERT'),
-          } : false,
-          
-          // Cache
-          cache: {
-            type: 'redis',
-            options: {
-              host: configService.get<string>('REDIS_HOST', 'localhost'),
-              port: configService.get<number>('REDIS_PORT', 6379),
-              password: configService.get<string>('REDIS_PASSWORD'),
-              db: configService.get<number>('REDIS_DB', 0),
+    imports: [
+        TypeOrmModule.forRootAsync({
+            imports: [ConfigModule],
+            inject: [ConfigService],
+            useFactory: (configService: ConfigService) => {
+                const logger = new Logger('DatabaseModule');
+                const isProduction = configService.get('NODE_ENV') === 'production';
+                const isTest = configService.get('NODE_ENV') === 'test';
+
+                const dbConfig = {
+                    type: 'postgres' as const,
+                    host: configService.get<string>('DB_HOST', 'localhost'),
+                    port: configService.get<number>('DB_PORT', 5432),
+                    username: configService.get<string>('DB_USERNAME', 'postgres'),
+                    password: configService.get<string>('DB_PASSWORD', 'postgres'),
+                    database: configService.get<string>('DB_DATABASE', 'moneycircle'),
+
+                    // All entities
+                    entities: [
+                        User,
+                        UserProfile,
+                        Loan,
+                        LoanApplication,
+                        LoanRepayment,
+                        LoanDocument,
+                        LoanCollateral,
+                        LoanGuarantor,
+                        Transaction,
+                        EscrowAccount,
+                        PaymentMethod,
+                        PayoutRequest,
+                        Disbursement,
+                        Investment,
+                        Listing,
+                        Bid,
+                        InvestmentPortfolio,
+                        AutoInvestRule,
+                        Notification,
+                        NotificationPreference,
+                        EmailTemplate,
+                        SmsLog,
+                        AuditLog,
+                        SystemLog,
+                        AccessLog,
+                        Kyc,
+                        KycDocument,
+                        ComplianceCheck,
+                        SanctionScreening,
+                        AmlAlert,
+                        RiskAssessment,
+                        CreditScore,
+                        RiskFactor,
+                        FraudDetection,
+                        BehavioralAnalysis,
+                        SystemConfig,
+                        AdminUser,
+                        AdminAction,
+                        SystemMaintenance,
+                        ApiKey,
+                        FinancialReport,
+                        UserReport,
+                        LoanReport,
+                        RiskReport,
+                        UserAnalytics,
+                        LoanAnalytics,
+                        PlatformAnalytics,
+                    ],
+
+                    // Migrations
+                    migrations: [path.join(__dirname, '..', '..', 'migrations', '*.{js,ts}')],
+                    migrationsTableName: 'migrations_history',
+                    migrationsRun: configService.get<boolean>('DB_MIGRATIONS_RUN', true),
+                    migrationsTransactionMode: 'each' as const, // Fixed type issue
+
+                    // Connection settings
+                    synchronize: configService.get<boolean>('DB_SYNCHRONIZE', !isProduction && !isTest),
+                    logging: configService.get<boolean>('DB_LOGGING', !isProduction),
+                    logger: isProduction ? 'advanced-console' : 'debug' as any,
+                    maxQueryExecutionTime: configService.get<number>('DB_MAX_QUERY_TIME', 1000),
+
+                    // Connection pool
+                    poolSize: configService.get<number>('DB_POOL_SIZE', 10),
+                    extra: {
+                        connectionTimeoutMillis: configService.get<number>('DB_CONNECTION_TIMEOUT', 5000),
+                        idleTimeoutMillis: configService.get<number>('DB_IDLE_TIMEOUT', 30000),
+                        max: configService.get<number>('DB_MAX_CONNECTIONS', 20),
+                    },
+
+                    // Naming strategy
+                    namingStrategy: new DefaultNamingStrategy(),
+
+                    // SSL for production
+                    ssl: isProduction ? {
+                        rejectUnauthorized: false,
+                        ca: configService.get<string>('DB_SSL_CA'),
+                        key: configService.get<string>('DB_SSL_KEY'),
+                        cert: configService.get<string>('DB_SSL_CERT'),
+                    } : false,
+
+                    // Cache
+                    cache: {
+                        type: 'redis' as const,  // Add 'as const'
+                        options: {
+                            host: configService.get<string>('REDIS_HOST', 'localhost'),
+                            port: configService.get<number>('REDIS_PORT', 6379),
+                            password: configService.get<string>('REDIS_PASSWORD'),
+                            db: configService.get<number>('REDIS_DB', 0),
+                        },
+                        duration: configService.get<number>('DB_CACHE_DURATION', 30000),
+                        ignoreErrors: true,
+                    },
+
+                    // Replication (for production)
+                    replication: isProduction ? {
+                        master: {
+                            host: configService.get<string>('DB_MASTER_HOST') || configService.get<string>('DB_HOST'),
+                            port: configService.get<number>('DB_MASTER_PORT') || configService.get<number>('DB_PORT'),
+                            username: configService.get<string>('DB_MASTER_USERNAME') || configService.get<string>('DB_USERNAME'),
+                            password: configService.get<string>('DB_MASTER_PASSWORD') || configService.get<string>('DB_PASSWORD'),
+                            database: configService.get<string>('DB_MASTER_DATABASE') || configService.get<string>('DB_DATABASE'),
+                        },
+                        slaves: configService.get<string>('DB_REPLICA_HOSTS', '').split(',').filter(Boolean).map((host) => ({
+                            host: host.trim(),
+                            port: configService.get<number>('DB_REPLICA_PORT', configService.get<number>('DB_PORT')),
+                            username: configService.get<string>('DB_REPLICA_USERNAME', configService.get<string>('DB_USERNAME')),
+                            password: configService.get<string>('DB_REPLICA_PASSWORD', configService.get<string>('DB_PASSWORD')),
+                            database: configService.get<string>('DB_REPLICA_DATABASE', configService.get<string>('DB_DATABASE')),
+                        })),
+                        canRetry: true,
+                        removeNodeErrorCount: 5,
+                        restoreNodeTimeout: 0,
+                        selector: 'RR', // Round Robin
+                    } : undefined,
+
+                    // Entity metadata
+                    entitySkipConstructor: false,
+                    entityPrefix: configService.get<string>('DB_TABLE_PREFIX', ''),
+                    relationLoadStrategy: 'query' as const,
+
+                    // Drivers specific
+                    applicationName: 'MoneyCircle-Backend',
+                    installExtensions: true,
+                    useUTC: true,
+                };
+
+                logger.log(`Database configuration loaded for ${configService.get('NODE_ENV')} environment`);
+                logger.debug(`Database: ${dbConfig.database}@${dbConfig.host}:${dbConfig.port}`);
+
+                return dbConfig;
             },
-            duration: configService.get<number>('DB_CACHE_DURATION', 30000),
-            ignoreErrors: true,
-          },
-          
-          // Replication (for production)
-          replication: isProduction ? {
-            master: {
-              host: configService.get<string>('DB_MASTER_HOST') || configService.get<string>('DB_HOST'),
-              port: configService.get<number>('DB_MASTER_PORT') || configService.get<number>('DB_PORT'),
-              username: configService.get<string>('DB_MASTER_USERNAME') || configService.get<string>('DB_USERNAME'),
-              password: configService.get<string>('DB_MASTER_PASSWORD') || configService.get<string>('DB_PASSWORD'),
-              database: configService.get<string>('DB_MASTER_DATABASE') || configService.get<string>('DB_DATABASE'),
+            dataSourceFactory: async (options) => {
+                const logger = new Logger('DataSourceFactory');
+                try {
+                    const dataSource = new DataSource(options);
+                    await dataSource.initialize();
+
+                    logger.log('Database connection established successfully');
+
+                    // Initialize transactional data source
+                    return addTransactionalDataSource(dataSource);
+                } catch (error) {
+                    logger.error('Failed to establish database connection:', error);
+                    throw error;
+                }
             },
-            slaves: configService.get<string>('DB_REPLICA_HOSTS', '').split(',').filter(Boolean).map((host, _index) => ({ // Fixed unused variable
-              host: host.trim(),
-              port: configService.get<number>('DB_REPLICA_PORT', configService.get<number>('DB_PORT')),
-              username: configService.get<string>('DB_REPLICA_USERNAME', configService.get<string>('DB_USERNAME')),
-              password: configService.get<string>('DB_REPLICA_PASSWORD', configService.get<string>('DB_PASSWORD')),
-              database: configService.get<string>('DB_REPLICA_DATABASE', configService.get<string>('DB_DATABASE')),
-            })),
-            canRetry: true,
-            removeNodeErrorCount: 5,
-            restoreNodeTimeout: 0,
-            selector: 'RR', // Round Robin
-          } : undefined,
-          
-          // Entity metadata
-          entitySkipConstructor: false,
-          entityPrefix: configService.get<string>('DB_TABLE_PREFIX', ''),
-          relationLoadStrategy: 'query' as const,
-          
-          // Drivers specific
-          applicationName: 'MoneyCircle-Backend',
-          installExtensions: true,
-          useUTC: true,
-        };
-        
-        logger.log(`Database configuration loaded for ${configService.get('NODE_ENV')} environment`);
-        logger.debug(`Database: ${dbConfig.database}@${dbConfig.host}:${dbConfig.port}`);
-        
-        return dbConfig;
-      },
-      dataSourceFactory: async (options) => {
-        const logger = new Logger('DataSourceFactory');
-        try {
-          const dataSource = new DataSource(options);
-          await dataSource.initialize();
-          
-          logger.log('Database connection established successfully');
-          
-          // Initialize transactional data source
-          return addTransactionalDataSource(dataSource);
-        } catch (error) {
-          logger.error('Failed to establish database connection:', error);
-          throw error;
-        }
-      },
-    }),
-  ],
-  exports: [TypeOrmModule],
+        }),
+    ],
+    exports: [TypeOrmModule],
 })
-export class DatabaseModule {}
+export class DatabaseModule { }

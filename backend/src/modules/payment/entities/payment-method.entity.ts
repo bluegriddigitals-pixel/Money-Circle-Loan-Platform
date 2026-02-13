@@ -1,5 +1,6 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
+import { Transaction } from './transaction.entity';  // FIXED: Correct path
 import { PaymentMethodStatus, PaymentMethodType } from '../enums/payment-method.enum';
 
 @Entity('payment_methods')
@@ -62,6 +63,10 @@ export class PaymentMethod {
 
   @Column({ nullable: true })
   lastUsedAt: Date;
+
+  // Relationship with Transaction
+  @OneToMany(() => Transaction, transaction => transaction.paymentMethod)
+  transactions: Transaction[];
 
   @CreateDateColumn()
   createdAt: Date;

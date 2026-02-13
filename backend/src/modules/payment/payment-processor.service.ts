@@ -1,18 +1,49 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+export interface ProcessPaymentParams {
+    amount: number;
+    currency: string;
+    paymentMethodId: string;
+    customerId?: string;
+    description?: string;
+    metadata?: any;
+}
+
+export interface RefundPaymentParams {
+    originalTransactionId: string;
+    amount: number;
+    reason?: string;
+}
+
+export interface ProcessPayoutParams {
+    amount: number;
+    currency: string;
+    recipientDetails: any;
+    description?: string;
+}
+
 @Injectable()
 export class PaymentProcessorService {
   public readonly logger = new Logger(PaymentProcessorService.name);
 
-  async processPayment(): Promise<{ transactionId: string }> {
+  // Update to accept parameters
+  async processPayment(data: ProcessPaymentParams): Promise<{ transactionId: string }> {
+    this.logger.log(`Processing payment: ${data.amount} ${data.currency}`);
+    // In production, this would call actual payment gateway
     return { transactionId: `proc_${Date.now()}` };
   }
 
-  async refundPayment(): Promise<{ refundId: string }> {
+  // Update to accept parameters
+  async refundPayment(data: RefundPaymentParams): Promise<{ refundId: string }> {
+    this.logger.log(`Processing refund: ${data.amount} for transaction ${data.originalTransactionId}`);
+    // In production, this would call actual refund gateway
     return { refundId: `ref_${Date.now()}` };
   }
 
-  async processPayout(): Promise<{ transactionId: string }> {
+  // Update to accept parameters
+  async processPayout(data: ProcessPayoutParams): Promise<{ transactionId: string }> {
+    this.logger.log(`Processing payout: ${data.amount} ${data.currency}`);
+    // In production, this would call actual payout service
     return { transactionId: `payout_${Date.now()}` };
   }
 

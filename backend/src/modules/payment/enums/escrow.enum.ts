@@ -1,16 +1,19 @@
+// src/modules/payment/enums/escrow.enum.ts
+
 export enum EscrowAccountStatus {
-  ACTIVE = 'active',
   PENDING = 'pending',
-  SUSPENDED = 'suspended',
-  CLOSED = 'closed',
+  ACTIVE = 'active',
   FROZEN = 'frozen',
+  CLOSED = 'closed',
 }
 
 export enum EscrowAccountType {
+  STANDARD = 'standard',
   LOAN_DISBURSEMENT = 'loan_disbursement',
   LOAN_REPAYMENT = 'loan_repayment',
-  COLLATERAL = 'collateral',
-  TAX_HOLDING = 'tax_holding',
-  FEES_HOLDING = 'fees_holding',
-  GENERAL = 'general',
+  INVESTMENT = 'investment',
+  RESERVE = 'reserve',
+  FEES = 'fees',
 }
+
+// You can also add more specific types based on your business needs

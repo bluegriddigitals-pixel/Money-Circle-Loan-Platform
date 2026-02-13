@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, FindOptionsWhere } from 'typeorm';
-import { Transaction, TransactionStatus } from '../entities/transaction.entity';
+import { Transaction } from '../entities/transaction.entity';
+import { TransactionStatus } from '../enums/transaction.enum';
 
 @Injectable()
 export class TransactionService {
