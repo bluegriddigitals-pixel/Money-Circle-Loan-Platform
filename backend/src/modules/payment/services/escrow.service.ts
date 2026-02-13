@@ -42,15 +42,17 @@ export class EscrowService {
     }
 
     if (type === 'credit') {
-      if (escrow.maximumBalance && (escrow.currentBalance + amount) > escrow.maximumBalance) {
+      if (escrow.maximumBalance && (Number(escrow.currentBalance) + amount) > Number(escrow.maximumBalance)) {
         throw new BadRequestException('Would exceed maximum balance');
       }
-      escrow.currentBalance += amount;
+      escrow.currentBalance = Number(escrow.currentBalance) + amount;
+      escrow.availableBalance = Number(escrow.availableBalance) + amount;
     } else {
-      if (amount > escrow.availableBalance) {
+      if (amount > Number(escrow.availableBalance)) {
         throw new BadRequestException('Insufficient available balance');
       }
-      escrow.currentBalance -= amount;
+      escrow.currentBalance = Number(escrow.currentBalance) - amount;
+      escrow.availableBalance = Number(escrow.availableBalance) - amount;
     }
 
     return this.escrowRepository.save(escrow);
@@ -83,6 +85,6 @@ export class EscrowService {
     }
     
     const result = await query.getRawOne();
-    return result?.total || 0;
+    return Number(result?.total) || 0;
   }
 }

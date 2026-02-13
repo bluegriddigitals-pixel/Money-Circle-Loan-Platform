@@ -4,15 +4,15 @@ import { Injectable, Logger } from '@nestjs/common';
 export class PaymentProcessorService {
   public readonly logger = new Logger(PaymentProcessorService.name);
 
-  async processPayment(data?: any): Promise<{ transactionId: string }> {
+  async processPayment(): Promise<{ transactionId: string }> {
     return { transactionId: `proc_${Date.now()}` };
   }
 
-  async refundPayment(data?: any): Promise<{ refundId: string }> {
+  async refundPayment(): Promise<{ refundId: string }> {
     return { refundId: `ref_${Date.now()}` };
   }
 
-  async processPayout(data?: any): Promise<{ transactionId: string }> {
+  async processPayout(): Promise<{ transactionId: string }> {
     return { transactionId: `payout_${Date.now()}` };
   }
 
@@ -20,7 +20,6 @@ export class PaymentProcessorService {
     return { status: 'healthy' };
   }
 
-  // ✅ ADD ALL THESE MISSING METHODS
   async parseWebhookEvent(rawPayload: string, signature: string): Promise<any> {
     this.logger.log(`Parsing webhook event with signature: ${signature.substring(0, 10)}...`);
     return JSON.parse(rawPayload);
@@ -45,7 +44,7 @@ export class PaymentProcessorService {
     };
   }
 
-  async createCustomer(email: string, name?: string, phone?: string): Promise<string> {
+  async createCustomer(email: string): Promise<string> {
     this.logger.log(`Creating customer: ${email}`);
     return `cus_${Date.now()}`;
   }

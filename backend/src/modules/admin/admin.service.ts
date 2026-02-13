@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, Like } from 'typeorm';
+import { Repository, Between, Like, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import { AdminUser } from './entities/admin-user.entity';
 import { AdminAction } from './entities/admin-action.entity';
 import { SystemConfig } from './entities/system-config.entity';
@@ -70,11 +70,13 @@ export class AdminService {
     const adminUser = await this.findAdminUserById(id);
     
     if (updateAdminUserDto.password) {
-      updateAdminUserDto['passwordHash'] = await bcrypt.hash(updateAdminUserDto.password, 10);
+      const passwordHash = await bcrypt.hash(updateAdminUserDto.password, 10);
       delete updateAdminUserDto.password;
+      Object.assign(adminUser, updateAdminUserDto, { passwordHash });
+    } else {
+      Object.assign(adminUser, updateAdminUserDto);
     }
     
-    Object.assign(adminUser, updateAdminUserDto);
     return this.adminUserRepository.save(adminUser);
   }
 
@@ -220,7 +222,7 @@ export class AdminService {
     return this.systemMaintenanceRepository.findOne({
       where: {
         startTime: LessThanOrEqual(now),
-        endTime: GreaterThanOrEqual(now),
+        endTime: MoreThanOrEqual(now),
         isActive: true,
       },
     });
@@ -303,12 +305,4 @@ export class AdminService {
       totalApiKeys,
     };
   }
-}
-
-function LessThanOrEqual(date: Date) {
-  return { $lte: date };
-}
-
-function GreaterThanOrEqual(date: Date) {
-  return { $gte: date };
 }

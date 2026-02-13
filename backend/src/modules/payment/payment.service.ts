@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, Between } from 'typeorm';
+import { Repository, DataSource, Between, FindOptionsWhere } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 
 import { Transaction } from './entities/transaction.entity';
@@ -20,7 +20,6 @@ import { TransferFundsDto } from './dto/transfer-funds.dto';
 import { ApprovePayoutDto } from './dto/approve-payout.dto';
 import { ScheduleDisbursementDto } from './dto/schedule-disbursement.dto';
 
-// Import enums ONLY from enums folder - THIS IS THE ONLY SOURCE OF ENUMS
 import { 
     TransactionStatus, 
     TransactionType 
@@ -30,7 +29,8 @@ import {
     EscrowAccountType 
 } from './enums/escrow.enum';
 import { 
-    PaymentMethodStatus 
+    PaymentMethodStatus,
+    PaymentMethodType 
 } from './enums/payment-method.enum';
 import { 
     PayoutRequestStatus, 
@@ -40,7 +40,6 @@ import {
     DisbursementStatus 
 } from './enums/disbursement.enum';
 
-// Import missing services
 import { NotificationService } from '../notification/notification.service';
 import { LoanService } from '../loan/loan.service';
 import { UserService } from '../user/user.service';
@@ -83,6 +82,10 @@ export class PaymentService {
         return `DISB-${new Date().getFullYear()}-${uuidv4().slice(0, 8).toUpperCase()}`;
     }
 
+    private generateAccountNumber(): string {
+        return `ESC-${new Date().getFullYear()}-${uuidv4().slice(0, 8).toUpperCase()}`;
+    }
+
     // ============================================
     // TRANSACTION METHODS
     // ============================================
@@ -93,10 +96,8 @@ export class PaymentService {
         await queryRunner.startTransaction();
 
         try {
-            // Generate transaction number
             const transactionNumber = this.generateTransactionNumber();
 
-            // Create transaction entity instance - NOT an array
             const transaction = new Transaction();
             Object.assign(transaction, {
                 ...createTransactionDto,
@@ -105,7 +106,6 @@ export class PaymentService {
                 status: createTransactionDto.status || TransactionStatus.PENDING,
             });
 
-            // If transaction is related to an escrow account, update the balance
             if (createTransactionDto.escrowAccountId) {
                 const escrowAccount = await this.escrowAccountRepository
                     .createQueryBuilder('escrow')
@@ -121,7 +121,6 @@ export class PaymentService {
                     throw new BadRequestException('Escrow account is not active');
                 }
 
-                // Update escrow balance based on transaction type
                 if (createTransactionDto.type === TransactionType.DEPOSIT) {
                     if (createTransactionDto.amount <= 0) {
                         throw new BadRequestException('Deposit amount must be positive');
@@ -140,10 +139,8 @@ export class PaymentService {
                 await queryRunner.manager.save(escrowAccount);
             }
 
-            // Save the transaction
             const savedTransaction = await queryRunner.manager.save(transaction);
 
-            // If payment method is specified, update its usage
             if (createTransactionDto.paymentMethodId) {
                 const paymentMethod = await this.paymentMethodRepository.findOne({
                     where: { id: createTransactionDto.paymentMethodId },
@@ -151,14 +148,12 @@ export class PaymentService {
 
                 if (paymentMethod) {
                     paymentMethod.lastUsedAt = new Date();
-                    paymentMethod.recordTransaction(createTransactionDto.amount);
                     await queryRunner.manager.save(paymentMethod);
                 }
             }
 
             await queryRunner.commitTransaction();
 
-            // Send notification
             await this.notificationService.sendTransactionNotification(savedTransaction);
 
             this.logger.log(`Transaction ${savedTransaction.transactionNumber} created successfully`);
@@ -172,13 +167,31 @@ export class PaymentService {
         }
     }
 
+    async getAllTransactions(page: number = 1, limit: number = 10): Promise<{ data: Transaction[]; total: number; page: number; limit: number }> {
+        const [data, total] = await this.transactionRepository.findAndCount({
+            skip: (page - 1) * limit,
+            take: limit,
+            order: { createdAt: 'DESC' },
+            relations: ['loan', 'escrowAccount', 'paymentMethod']
+        });
+        
+        return { data, total, page, limit };
+    }
+
+    async getUserTransactions(userId: string): Promise<Transaction[]> {
+        return this.transactionRepository.find({
+            where: { userId },
+            order: { createdAt: 'DESC' },
+            relations: ['loan', 'escrowAccount', 'paymentMethod']
+        });
+    }
+
     async processPayment(processPaymentDto: ProcessPaymentDto): Promise<Transaction> {
         const queryRunner = this.dataSource.createQueryRunner();
         await queryRunner.connect();
         await queryRunner.startTransaction();
 
         try {
-            // Validate payment method
             const paymentMethod = await this.paymentMethodRepository.findOne({
                 where: { id: processPaymentDto.paymentMethodId },
             });
@@ -187,19 +200,10 @@ export class PaymentService {
                 throw new NotFoundException('Payment method not found');
             }
 
-            if (!paymentMethod.isActive) {
+            if (paymentMethod.status !== PaymentMethodStatus.ACTIVE && paymentMethod.status !== PaymentMethodStatus.VERIFIED) {
                 throw new BadRequestException('Payment method is not active');
             }
 
-            if (paymentMethod.isExpired) {
-                throw new BadRequestException('Payment method has expired');
-            }
-
-            if (!paymentMethod.canProcessTransaction(processPaymentDto.amount)) {
-                throw new BadRequestException('Transaction exceeds payment method limits');
-            }
-
-            // Process payment through external processor
             const processorResponse = await this.paymentProcessorService.processPayment({
                 amount: processPaymentDto.amount,
                 currency: processPaymentDto.currency || 'USD',
@@ -209,7 +213,6 @@ export class PaymentService {
                 metadata: processPaymentDto.metadata,
             });
 
-            // Create transaction record
             const transaction = await this.createTransaction({
                 ...processPaymentDto,
                 type: TransactionType.DEPOSIT,
@@ -229,7 +232,6 @@ export class PaymentService {
             await queryRunner.rollbackTransaction();
             this.logger.error(`Payment processing failed: ${error.message}`, error.stack);
 
-            // Create failed transaction record
             if (processPaymentDto.createFailedTransaction !== false) {
                 await this.createTransaction({
                     ...processPaymentDto,
@@ -327,13 +329,13 @@ export class PaymentService {
                 throw new BadRequestException('Only completed transactions can be refunded');
             }
 
-            // Create refund transaction
             const refundTransaction = new Transaction();
             Object.assign(refundTransaction, {
                 transactionNumber: `REF-${originalTransaction.transactionNumber}`,
                 loanId: originalTransaction.loanId,
                 escrowAccountId: originalTransaction.escrowAccountId,
                 paymentMethodId: originalTransaction.paymentMethodId,
+                userId: originalTransaction.userId,
                 type: TransactionType.REFUND,
                 status: TransactionStatus.PENDING,
                 amount: originalTransaction.amount,
@@ -346,7 +348,6 @@ export class PaymentService {
                 },
             });
 
-            // Update original transaction status
             originalTransaction.status = TransactionStatus.REFUNDED;
             originalTransaction.metadata = {
                 ...originalTransaction.metadata,
@@ -354,7 +355,6 @@ export class PaymentService {
                 refundTransactionId: refundTransaction.id,
             };
 
-            // If transaction was from escrow, return funds
             if (originalTransaction.escrowAccountId) {
                 const escrowAccount = await this.escrowAccountRepository
                     .createQueryBuilder('escrow')
@@ -377,7 +377,6 @@ export class PaymentService {
 
             await queryRunner.commitTransaction();
 
-            // Process refund through payment processor
             if (originalTransaction.paymentMethodId) {
                 try {
                     await this.paymentProcessorService.refundPayment({
@@ -394,7 +393,6 @@ export class PaymentService {
                     await this.transactionRepository.save(savedRefundTransaction);
                 } catch (processorError) {
                     this.logger.error(`Payment processor refund failed: ${processorError.message}`);
-                    // Don't throw - we still recorded the refund internally
                 }
             }
 
@@ -409,14 +407,21 @@ export class PaymentService {
         }
     }
 
+    async refundPayment(data: { transactionId: string; amount?: number; reason?: string }): Promise<Transaction> {
+        return this.refundTransaction(data.transactionId, data.reason);
+    }
+
     // ============================================
     // ESCROW ACCOUNT METHODS
     // ============================================
 
     async createEscrowAccount(createEscrowAccountDto: CreateEscrowAccountDto): Promise<EscrowAccount> {
         const escrowAccount = new EscrowAccount();
+        const accountNumber = this.generateAccountNumber();
+        
         Object.assign(escrowAccount, {
             ...createEscrowAccountDto,
+            accountNumber,
             currentBalance: createEscrowAccountDto.initialAmount || 0,
             status: EscrowAccountStatus.ACTIVE
         });
@@ -440,6 +445,10 @@ export class PaymentService {
         return escrowAccount;
     }
 
+    async getEscrowByLoan(loanId: string): Promise<EscrowAccount[]> {
+        return this.getEscrowAccountByLoan(loanId);
+    }
+
     async getEscrowAccountByLoan(loanId: string, type?: EscrowAccountType): Promise<EscrowAccount[]> {
         const query = this.escrowAccountRepository.createQueryBuilder('account')
             .where('account.loanId = :loanId', { loanId })
@@ -459,7 +468,6 @@ export class PaymentService {
             throw new BadRequestException('Deposit amount must be positive');
         }
 
-        // Get a SINGLE escrow account, not an array
         const escrowAccount = await this.escrowAccountRepository.findOne({
             where: { id: escrowAccountId }
         });
@@ -472,12 +480,10 @@ export class PaymentService {
             throw new BadRequestException('Escrow account is not active');
         }
 
-        // Check maximum balance limit
         if (escrowAccount.maximumBalance && (escrowAccount.currentBalance + amount) > escrowAccount.maximumBalance) {
             throw new BadRequestException('Deposit would exceed maximum balance limit');
         }
 
-        // Create deposit transaction
         const transaction = await this.createTransaction({
             escrowAccountId,
             type: TransactionType.DEPOSIT,
@@ -496,7 +502,6 @@ export class PaymentService {
             throw new BadRequestException('Withdrawal amount must be positive');
         }
 
-        // Get a SINGLE escrow account, not an array
         const escrowAccount = await this.escrowAccountRepository.findOne({
             where: { id: escrowAccountId }
         });
@@ -513,7 +518,6 @@ export class PaymentService {
             throw new BadRequestException('Insufficient available balance');
         }
 
-        // Create withdrawal transaction
         const transaction = await this.createTransaction({
             escrowAccountId,
             type: TransactionType.WITHDRAWAL,
@@ -539,7 +543,6 @@ export class PaymentService {
                 throw new BadRequestException('Cannot transfer to the same account');
             }
 
-            // Get SINGLE accounts, not arrays
             const fromAccount = await this.escrowAccountRepository
                 .createQueryBuilder('escrow')
                 .setLock('pessimistic_write')
@@ -568,7 +571,6 @@ export class PaymentService {
                 throw new BadRequestException('Insufficient available balance in source account');
             }
 
-            // Create withdrawal from source
             const fromTransaction = new Transaction();
             Object.assign(fromTransaction, {
                 escrowAccountId: fromAccount.id,
@@ -584,7 +586,6 @@ export class PaymentService {
                 },
             });
 
-            // Create deposit to destination
             const toTransaction = new Transaction();
             Object.assign(toTransaction, {
                 escrowAccountId: toAccount.id,
@@ -600,14 +601,12 @@ export class PaymentService {
                 },
             });
 
-            // Update balances
             fromAccount.currentBalance -= amount;
             toAccount.currentBalance += amount;
 
             await queryRunner.manager.save(fromAccount);
             await queryRunner.manager.save(toAccount);
 
-            // Save transactions and get the saved instances
             const savedFromTransaction = await queryRunner.manager.save(fromTransaction);
             const savedToTransaction = await queryRunner.manager.save(toTransaction);
 
@@ -628,6 +627,10 @@ export class PaymentService {
         }
     }
 
+    async freezeEscrow(id: string, reason: string): Promise<EscrowAccount> {
+        return this.freezeEscrowAccount(id, reason);
+    }
+
     async freezeEscrowAccount(escrowAccountId: string, reason: string): Promise<EscrowAccount> {
         const escrowAccount = await this.escrowAccountRepository.findOne({
             where: { id: escrowAccountId },
@@ -637,11 +640,16 @@ export class PaymentService {
             throw new NotFoundException('Escrow account not found');
         }
 
-        escrowAccount.freeze(reason);
+        escrowAccount.status = EscrowAccountStatus.FROZEN;
+        escrowAccount.frozenReason = reason;
         const updatedAccount = await this.escrowAccountRepository.save(escrowAccount);
 
         this.logger.log(`Escrow account ${escrowAccount.accountNumber} frozen: ${reason}`);
         return updatedAccount;
+    }
+
+    async unfreezeEscrow(id: string): Promise<EscrowAccount> {
+        return this.unfreezeEscrowAccount(id);
     }
 
     async unfreezeEscrowAccount(escrowAccountId: string): Promise<EscrowAccount> {
@@ -653,11 +661,16 @@ export class PaymentService {
             throw new NotFoundException('Escrow account not found');
         }
 
-        escrowAccount.unfreeze();
+        escrowAccount.status = EscrowAccountStatus.ACTIVE;
+        escrowAccount.frozenReason = null;
         const updatedAccount = await this.escrowAccountRepository.save(escrowAccount);
 
         this.logger.log(`Escrow account ${escrowAccount.accountNumber} unfrozen`);
         return updatedAccount;
+    }
+
+    async closeEscrow(id: string, reason: string): Promise<EscrowAccount> {
+        return this.closeEscrowAccount(id, reason);
     }
 
     async closeEscrowAccount(escrowAccountId: string, reason: string): Promise<EscrowAccount> {
@@ -675,7 +688,9 @@ export class PaymentService {
             throw new BadRequestException('Cannot close account with positive balance');
         }
 
-        escrowAccount.close(reason);
+        escrowAccount.status = EscrowAccountStatus.CLOSED;
+        escrowAccount.closedReason = reason;
+        escrowAccount.closedAt = new Date();
         const updatedAccount = await this.escrowAccountRepository.save(escrowAccount);
 
         this.logger.log(`Escrow account ${escrowAccount.accountNumber} closed: ${reason}`);
@@ -687,15 +702,14 @@ export class PaymentService {
     // ============================================
 
     async createPaymentMethod(createPaymentMethodDto: CreatePaymentMethodDto): Promise<PaymentMethod> {
-        // Check if this is the first payment method for the user
         const existingMethods = await this.paymentMethodRepository.count({
             where: { userId: createPaymentMethodDto.userId },
         });
 
-        // Create payment method instance
         const paymentMethod = new PaymentMethod();
+        
         paymentMethod.userId = createPaymentMethodDto.userId;
-        paymentMethod.type = createPaymentMethodDto.type;
+        paymentMethod.type = createPaymentMethodDto.type as any;
         paymentMethod.lastFour = createPaymentMethodDto.lastFour;
         paymentMethod.name = createPaymentMethodDto.holderName;
         paymentMethod.bankName = createPaymentMethodDto.bankName;
@@ -729,19 +743,16 @@ export class PaymentService {
     }
 
     async getUserPaymentMethods(userId: string, includeInactive: boolean = false): Promise<PaymentMethod[]> {
-        const query = this.paymentMethodRepository.createQueryBuilder('method')
-            .where('method.userId = :userId', { userId });
-
+        const where: FindOptionsWhere<PaymentMethod> = { userId };
+        
         if (!includeInactive) {
-            query.andWhere('method.status IN (:...statuses)', {
-                statuses: [PaymentMethodStatus.ACTIVE, PaymentMethodStatus.VERIFIED],
-            });
+            where.status = PaymentMethodStatus.ACTIVE || PaymentMethodStatus.VERIFIED as any;
         }
 
-        query.orderBy('method.isDefault', 'DESC')
-            .addOrderBy('method.createdAt', 'DESC');
-
-        return query.getMany();
+        return this.paymentMethodRepository.find({
+            where,
+            order: { isDefault: 'DESC', createdAt: 'DESC' }
+        });
     }
 
     async setDefaultPaymentMethod(userId: string, paymentMethodId: string): Promise<void> {
@@ -750,22 +761,19 @@ export class PaymentService {
         await queryRunner.startTransaction();
 
         try {
-            // Get all user's payment methods
             const paymentMethods = await this.paymentMethodRepository.find({
                 where: { userId },
             });
 
-            // Find the method to set as default
             const methodToSet = paymentMethods.find(method => method.id === paymentMethodId);
             if (!methodToSet) {
                 throw new NotFoundException('Payment method not found');
             }
 
-            if (!methodToSet.isActive) {
+            if (methodToSet.status !== PaymentMethodStatus.ACTIVE && methodToSet.status !== PaymentMethodStatus.VERIFIED) {
                 throw new BadRequestException('Cannot set inactive payment method as default');
             }
 
-            // Remove default from all methods
             for (const method of paymentMethods) {
                 if (method.isDefault) {
                     method.isDefault = false;
@@ -773,7 +781,6 @@ export class PaymentService {
                 }
             }
 
-            // Set new default
             methodToSet.isDefault = true;
             await queryRunner.manager.save(methodToSet);
 
@@ -797,7 +804,14 @@ export class PaymentService {
             throw new NotFoundException('Payment method not found');
         }
 
-        paymentMethod.verify(verificationMethod);
+        paymentMethod.status = PaymentMethodStatus.VERIFIED;
+        paymentMethod.isVerified = true;
+        paymentMethod.metadata = {
+            ...paymentMethod.metadata,
+            verifiedAt: new Date(),
+            verificationMethod,
+        };
+        
         const updatedMethod = await this.paymentMethodRepository.save(paymentMethod);
 
         this.logger.log(`Payment method ${paymentMethodId} verified using ${verificationMethod}`);
@@ -830,12 +844,23 @@ export class PaymentService {
         return updatedMethod;
     }
 
+    async removePaymentMethod(id: string, userId: string): Promise<PaymentMethod> {
+        const paymentMethod = await this.paymentMethodRepository.findOne({
+            where: { id, userId }
+        });
+        
+        if (!paymentMethod) {
+            throw new NotFoundException('Payment method not found');
+        }
+        
+        return this.deactivatePaymentMethod(id, 'Removed by user');
+    }
+
     // ============================================
     // PAYOUT REQUEST METHODS
     // ============================================
 
     async createPayoutRequest(createPayoutRequestDto: CreatePayoutRequestDto): Promise<PayoutRequest> {
-        // Validate escrow account if provided
         if (createPayoutRequestDto.escrowAccountId) {
             const escrowAccount = await this.escrowAccountRepository.findOne({
                 where: { id: createPayoutRequestDto.escrowAccountId },
@@ -861,11 +886,21 @@ export class PaymentService {
 
         const savedRequest = await this.payoutRequestRepository.save(payoutRequest);
 
-        // Send notification
         await this.notificationService.sendPayoutRequestNotification(savedRequest);
 
         this.logger.log(`Payout request ${savedRequest.requestNumber} created`);
         return savedRequest;
+    }
+
+    async getAllPayouts(): Promise<PayoutRequest[]> {
+        return this.payoutRequestRepository.find({
+            order: { createdAt: 'DESC' },
+            relations: ['user', 'escrowAccount']
+        });
+    }
+
+    async getUserPayouts(userId: string): Promise<PayoutRequest[]> {
+        return this.getUserPayoutRequests(userId);
     }
 
     async getPayoutRequest(id: string): Promise<PayoutRequest> {
@@ -912,6 +947,10 @@ export class PaymentService {
         return query.getMany();
     }
 
+    async approvePayout(id: string, approvedBy: string): Promise<PayoutRequest> {
+        return this.approvePayoutRequest(id, { approvedBy });
+    }
+
     async approvePayoutRequest(payoutRequestId: string, approvePayoutDto: ApprovePayoutDto): Promise<PayoutRequest> {
         const queryRunner = this.dataSource.createQueryRunner();
         await queryRunner.connect();
@@ -933,19 +972,21 @@ export class PaymentService {
                 throw new BadRequestException(`Cannot approve payout request with status: ${payoutRequest.status}`);
             }
 
-            // If escrow account is specified, validate balance
             if (payoutRequest.escrowAccount) {
                 if (payoutRequest.amount > payoutRequest.escrowAccount.availableBalance) {
                     throw new BadRequestException('Requested amount exceeds available escrow balance');
                 }
             }
 
-            payoutRequest.approve(approvePayoutDto.approvedBy, approvePayoutDto.notes);
+            payoutRequest.status = PayoutRequestStatus.APPROVED;
+            payoutRequest.approvedBy = approvePayoutDto.approvedBy;
+            payoutRequest.approvedAt = new Date();
+            payoutRequest.approvalNotes = approvePayoutDto.notes;
+            
             await queryRunner.manager.save(payoutRequest);
 
             await queryRunner.commitTransaction();
 
-            // Send notification
             await this.notificationService.sendPayoutApprovalNotification(payoutRequest);
 
             this.logger.log(`Payout request ${payoutRequest.requestNumber} approved`);
@@ -959,6 +1000,10 @@ export class PaymentService {
         }
     }
 
+    async rejectPayout(id: string, reason: string): Promise<PayoutRequest> {
+        return this.rejectPayoutRequest(id, 'system', reason);
+    }
+
     async rejectPayoutRequest(payoutRequestId: string, rejectedBy: string, reason: string): Promise<PayoutRequest> {
         const payoutRequest = await this.payoutRequestRepository.findOne({
             where: { id: payoutRequestId },
@@ -968,10 +1013,16 @@ export class PaymentService {
             throw new NotFoundException('Payout request not found');
         }
 
-        payoutRequest.reject(rejectedBy, reason);
+        payoutRequest.status = PayoutRequestStatus.REJECTED;
+        payoutRequest.metadata = {
+            ...payoutRequest.metadata,
+            rejectedBy,
+            rejectedAt: new Date(),
+            rejectionReason: reason,
+        };
+        
         const updatedRequest = await this.payoutRequestRepository.save(payoutRequest);
 
-        // Send notification
         await this.notificationService.sendPayoutRejectionNotification(updatedRequest);
 
         this.logger.log(`Payout request ${payoutRequest.requestNumber} rejected: ${reason}`);
@@ -984,7 +1035,6 @@ export class PaymentService {
         await queryRunner.startTransaction();
 
         try {
-            // Get SINGLE payout request, not an array
             const payoutRequestToProcess = await this.payoutRequestRepository
                 .createQueryBuilder('payout')
                 .setLock('pessimistic_write')
@@ -997,17 +1047,15 @@ export class PaymentService {
                 throw new NotFoundException('Payout request not found');
             }
 
-            if (!payoutRequestToProcess.canBeProcessed) {
+            if (payoutRequestToProcess.status !== PayoutRequestStatus.APPROVED) {
                 throw new BadRequestException(`Payout request cannot be processed with status: ${payoutRequestToProcess.status}`);
             }
 
             let transaction: Transaction | undefined;
 
-            // Start processing
-            payoutRequestToProcess.startProcessing();
+            payoutRequestToProcess.status = PayoutRequestStatus.PROCESSING;
             await queryRunner.manager.save(payoutRequestToProcess);
 
-            // If escrow account is involved, create withdrawal transaction
             if (payoutRequestToProcess.escrowAccount) {
                 transaction = await this.withdrawFromEscrow(
                     payoutRequestToProcess.escrowAccount.id,
@@ -1015,14 +1063,12 @@ export class PaymentService {
                     `Payout request ${payoutRequestToProcess.requestNumber}: ${payoutRequestToProcess.description || 'No description'}`
                 );
 
-                // Link transaction to payout request
                 payoutRequestToProcess.metadata = {
                     ...payoutRequestToProcess.metadata,
                     transactionId: transaction.id,
                 };
             }
 
-            // Process through payment processor if needed
             if (payoutRequestToProcess.payoutMethod === 'bank_transfer' || payoutRequestToProcess.payoutMethod === 'wire_transfer') {
                 try {
                     const processorResponse = await this.paymentProcessorService.processPayout({
@@ -1044,20 +1090,20 @@ export class PaymentService {
                     };
                 } catch (processorError) {
                     this.logger.error(`Payment processor payout failed: ${processorError.message}`);
-                    payoutRequestToProcess.fail(`Payment processor error: ${processorError.message}`);
+                    payoutRequestToProcess.status = PayoutRequestStatus.FAILED;
+                    payoutRequestToProcess.failureReason = `Payment processor error: ${processorError.message}`;
                     await queryRunner.manager.save(payoutRequestToProcess);
                     await queryRunner.commitTransaction();
                     return { payoutRequest: payoutRequestToProcess };
                 }
             }
 
-            // Complete the payout
-            payoutRequestToProcess.complete(payoutRequestToProcess.transactionReference);
+            payoutRequestToProcess.status = PayoutRequestStatus.COMPLETED;
+            payoutRequestToProcess.processedAt = new Date();
             await queryRunner.manager.save(payoutRequestToProcess);
 
             await queryRunner.commitTransaction();
 
-            // Send notification
             await this.notificationService.sendPayoutCompletionNotification(payoutRequestToProcess);
 
             this.logger.log(`Payout request ${payoutRequestToProcess.requestNumber} processed successfully`);
@@ -1076,7 +1122,6 @@ export class PaymentService {
     // ============================================
 
     async createDisbursement(createDisbursementDto: CreateDisbursementDto): Promise<Disbursement> {
-        // Validate loan exists
         const loan = await this.loanService.getLoanById(createDisbursementDto.loanId);
         if (!loan) {
             throw new NotFoundException('Loan not found');
@@ -1127,7 +1172,9 @@ export class PaymentService {
             throw new NotFoundException('Disbursement not found');
         }
 
-        disbursement.scheduleDisbursement(scheduleDisbursementDto.scheduledDate);
+        disbursement.status = DisbursementStatus.SCHEDULED;
+        disbursement.scheduledDate = scheduleDisbursementDto.scheduledDate;
+        
         const updatedDisbursement = await this.disbursementRepository.save(disbursement);
 
         this.logger.log(`Disbursement ${disbursement.disbursementNumber} scheduled for ${scheduleDisbursementDto.scheduledDate}`);
@@ -1143,10 +1190,15 @@ export class PaymentService {
             throw new NotFoundException('Disbursement not found');
         }
 
-        disbursement.approve(approvedBy, notes);
+        disbursement.status = DisbursementStatus.APPROVED;
+        disbursement.approvedBy = approvedBy;
+        disbursement.approvedAt = new Date();
+        if (notes) {
+            disbursement.approvalNotes = notes;
+        }
+        
         const updatedDisbursement = await this.disbursementRepository.save(disbursement);
 
-        // Send notification
         await this.notificationService.sendDisbursementApprovalNotification(updatedDisbursement);
 
         this.logger.log(`Disbursement ${disbursement.disbursementNumber} approved`);
@@ -1159,7 +1211,6 @@ export class PaymentService {
         await queryRunner.startTransaction();
 
         try {
-            // Get SINGLE disbursement, not an array
             const disbursementToProcess = await this.disbursementRepository
                 .createQueryBuilder('disbursement')
                 .setLock('pessimistic_write')
@@ -1172,15 +1223,20 @@ export class PaymentService {
                 throw new NotFoundException('Disbursement not found');
             }
 
-            if (!disbursementToProcess.canBeProcessed) {
+            if (disbursementToProcess.status !== DisbursementStatus.APPROVED && 
+                disbursementToProcess.status !== DisbursementStatus.SCHEDULED) {
                 throw new BadRequestException(`Disbursement cannot be processed with status: ${disbursementToProcess.status}`);
             }
 
-            const disbursementAmount = amount || disbursementToProcess.pendingAmount;
+            const pendingAmount = disbursementToProcess.amount - (disbursementToProcess.disbursedAmount || 0);
+            const disbursementAmount = amount || pendingAmount;
+
+            if (disbursementAmount > pendingAmount) {
+                throw new BadRequestException(`Disbursement amount ${disbursementAmount} exceeds pending amount ${pendingAmount}`);
+            }
 
             let transaction: Transaction | undefined;
 
-            // If escrow account is involved, create withdrawal transaction
             if (disbursementToProcess.escrowAccount) {
                 transaction = await this.withdrawFromEscrow(
                     disbursementToProcess.escrowAccount.id,
@@ -1188,25 +1244,30 @@ export class PaymentService {
                     `Disbursement ${disbursementToProcess.disbursementNumber} for loan ${disbursementToProcess.loan?.loanNumber || disbursementToProcess.loanId}`
                 );
 
-                // Link transaction to disbursement
                 disbursementToProcess.metadata = {
                     ...disbursementToProcess.metadata,
                     transactionId: transaction?.id,
                 };
             }
 
-            // Process the disbursement
-            disbursementToProcess.disburse(disbursementAmount, transaction?.transactionReference);
+            disbursementToProcess.disbursedAmount = (disbursementToProcess.disbursedAmount || 0) + disbursementAmount;
+            disbursementToProcess.disbursedAt = new Date();
+            disbursementToProcess.transactionReference = transaction?.transactionReference;
+            
+            if (disbursementToProcess.disbursedAmount >= disbursementToProcess.amount) {
+                disbursementToProcess.status = DisbursementStatus.COMPLETED;
+            } else {
+                disbursementToProcess.status = DisbursementStatus.PARTIAL;
+            }
+            
             await queryRunner.manager.save(disbursementToProcess);
 
-            // Update loan disbursed amount
             if (disbursementToProcess.loan) {
                 await this.loanService.updateDisbursedAmount(disbursementToProcess.loanId, disbursementAmount);
             }
 
             await queryRunner.commitTransaction();
 
-            // Send notification
             await this.notificationService.sendDisbursementNotification(disbursementToProcess);
 
             this.logger.log(`Disbursed ${disbursementAmount} for disbursement ${disbursementToProcess.disbursementNumber}`);
@@ -1229,7 +1290,11 @@ export class PaymentService {
             throw new NotFoundException('Disbursement not found');
         }
 
-        disbursement.createSchedule(installments);
+        disbursement.schedule = installments.map((installment, index) => ({
+            ...installment,
+            status: index === 0 ? 'pending' : 'scheduled',
+        }));
+        
         const updatedDisbursement = await this.disbursementRepository.save(disbursement);
 
         this.logger.log(`Schedule created for disbursement ${disbursement.disbursementNumber} with ${installments.length} installments`);
@@ -1247,7 +1312,6 @@ export class PaymentService {
         const tomorrow = new Date(today);
         tomorrow.setDate(tomorrow.getDate() + 1);
 
-        // Find disbursements scheduled for today
         const scheduledDisbursements = await this.disbursementRepository.find({
             where: {
                 status: DisbursementStatus.SCHEDULED,
@@ -1273,12 +1337,11 @@ export class PaymentService {
     }
 
     async processPendingPayoutRequests(): Promise<{ processed: number; failed: number }> {
-        // Find approved payout requests that are ready for processing
         const pendingPayouts = await this.payoutRequestRepository.find({
             where: {
                 status: PayoutRequestStatus.APPROVED,
             },
-            take: 100, // Process in batches
+            take: 100,
         });
 
         let processed = 0;
@@ -1373,6 +1436,47 @@ export class PaymentService {
         return query.getRawMany();
     }
 
+    async getPaymentStatistics(): Promise<any> {
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+        const [
+            totalTransactions,
+            monthlyTransactions,
+            yearlyVolume,
+            successRate
+        ] = await Promise.all([
+            this.transactionRepository.count(),
+            this.transactionRepository.count({
+                where: {
+                    createdAt: Between(startOfMonth, now)
+                }
+            }),
+            this.transactionRepository
+                .createQueryBuilder('transaction')
+                .select('SUM(transaction.amount)', 'total')
+                .where('transaction.createdAt >= :startOfYear', { startOfYear })
+                .andWhere('transaction.status = :status', { status: TransactionStatus.COMPLETED })
+                .getRawOne(),
+            this.transactionRepository
+                .createQueryBuilder('transaction')
+                .select('COUNT(CASE WHEN transaction.status = :completed THEN 1 END) * 100.0 / COUNT(*)', 'rate')
+                .setParameter('completed', TransactionStatus.COMPLETED)
+                .getRawOne()
+        ]);
+
+        return {
+            totalTransactions,
+            monthlyTransactions,
+            yearlyVolume: yearlyVolume?.total || 0,
+            successRate: Math.round((successRate?.rate || 0) * 100) / 100,
+            averageTransactionSize: totalTransactions > 0 
+                ? (yearlyVolume?.total || 0) / totalTransactions 
+                : 0
+        };
+    }
+
     // ============================================
     // UTILITY METHODS
     // ============================================
@@ -1382,7 +1486,7 @@ export class PaymentService {
             where: { id: paymentMethodId, userId },
         });
 
-        return !!paymentMethod && paymentMethod.isActive && !paymentMethod.isExpired;
+        return !!paymentMethod && (paymentMethod.status === PaymentMethodStatus.ACTIVE || paymentMethod.status === PaymentMethodStatus.VERIFIED);
     }
 
     async getAvailableBalance(escrowAccountId: string): Promise<number> {
@@ -1397,10 +1501,24 @@ export class PaymentService {
         return escrowAccount.availableBalance;
     }
 
+    async getUserBalance(userId: string): Promise<{ balance: number; currency: string }> {
+        const result = await this.transactionRepository
+            .createQueryBuilder('transaction')
+            .select('SUM(CASE WHEN transaction.type IN (:...credits) THEN transaction.amount ELSE -transaction.amount END)', 'balance')
+            .setParameter('credits', [TransactionType.DEPOSIT, TransactionType.REFUND])
+            .where('transaction.userId = :userId', { userId })
+            .andWhere('transaction.status = :status', { status: TransactionStatus.COMPLETED })
+            .getRawOne();
+
+        return {
+            balance: Number(result?.balance) || 0,
+            currency: 'USD'
+        };
+    }
+
     async calculateFees(amount: number, _transactionType: string): Promise<{ processingFee: number; tax: number; totalFees: number }> {
-        // Simple fee calculation logic - can be replaced with more complex rules
-        const processingFee = Math.max(2.5, amount * 0.029); // 2.9% or $2.5 minimum
-        const tax = processingFee * 0.1; // 10% tax on fees
+        const processingFee = Math.max(2.5, amount * 0.029);
+        const tax = processingFee * 0.1;
 
         return {
             processingFee: Math.round(processingFee * 100) / 100,
@@ -1411,14 +1529,12 @@ export class PaymentService {
 
     async healthCheck(): Promise<{ status: string; details: any }> {
         try {
-            // Check database connections
             const transactionCount = await this.transactionRepository.count();
             const escrowCount = await this.escrowAccountRepository.count();
             const paymentMethodCount = await this.paymentMethodRepository.count();
             const payoutCount = await this.payoutRequestRepository.count();
             const disbursementCount = await this.disbursementRepository.count();
 
-            // Check payment processor connectivity
             const processorStatus = await this.paymentProcessorService.healthCheck();
 
             return {

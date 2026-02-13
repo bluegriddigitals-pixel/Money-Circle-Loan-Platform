@@ -1,24 +1,54 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, Index } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
+import { User } from '../../user/entities/user.entity';
+import { Loan } from '../../loan/entities/loan.entity';
+import { RiskFactor } from './risk-factor.entity';
 
 @Entity('risk_assessments')
-@Index(['userId'])
-@Index(['score'])
 export class RiskAssessment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'varchar', length: 255 })
+  @ManyToOne(() => User)
+  @JoinColumn({ name: 'userId' })
+  user: User;
+
+  @Column()
   userId: string;
 
-  @Column({ type: 'integer' })
-  score: number;
+  @ManyToOne(() => Loan, { nullable: true })
+  @JoinColumn({ name: 'loanId' })
+  loan: Loan;
 
-  @Column({ type: 'varchar', length: 50 })
-  level: string;
+  @Column({ nullable: true })
+  loanId: string;
 
-  @Column({ type: 'jsonb', nullable: true })
-  factors: any;
+  @Column({ nullable: true })
+  creditScore: number;
 
-  @CreateDateColumn({ type: 'timestamp' })
+  @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
+  riskScore: number;
+
+  @Column({ nullable: true })
+  riskLevel: string;
+
+  @Column('jsonb', { nullable: true })
+  assessmentData: any;
+
+  @Column({ nullable: true })
+  assessedBy: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  assessedAt: Date;
+
+  @Column({ nullable: true })
+  notes: string;
+
+  @OneToMany(() => RiskFactor, riskFactor => riskFactor.assessment, { cascade: true })
+  riskFactors: RiskFactor[];
+
+  @CreateDateColumn()
   createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
 }
