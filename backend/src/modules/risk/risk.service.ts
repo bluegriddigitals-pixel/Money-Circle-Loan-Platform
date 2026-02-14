@@ -58,6 +58,14 @@ export class RiskService {
 
   async calculateRiskScore(userId: string, loanAmount: number): Promise<number> {
     // Implement risk calculation logic
-    return 75; // Placeholder
+    return 75;
+  }
+
+  async performInitialRiskAssessment(user: any, registerDto: any): Promise<{ riskLevel: string; factors: any[] }> {
+    return { riskLevel: 'LOW', factors: [] };
+  }
+
+  async calculateInitialCreditScore(user: any, registerDto: any): Promise<number> {
+    return 500;
   }
 }

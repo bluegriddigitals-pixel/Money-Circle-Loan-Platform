@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { Notification, NotificationType, NotificationChannel, NotificationStatus } from './entities/notification.entity';
+import { SmsService } from '../../shared/sms/sms.service';
 
 @Injectable()
 export class NotificationService {
@@ -10,6 +11,7 @@ export class NotificationService {
     constructor(
         @InjectRepository(Notification)
         private readonly notificationRepository: Repository<Notification>,
+        private readonly smsService: SmsService,
     ) { }
 
     async sendTransactionNotification(transaction: any): Promise<void> {
@@ -157,7 +159,7 @@ export class NotificationService {
             status: NotificationStatus.DELIVERED,
         });
     }
-
+    
     async getUserNotifications(userId: string, limit = 50): Promise<Notification[]> {
         return this.notificationRepository.find({
             where: { userId },
@@ -166,7 +168,6 @@ export class NotificationService {
         });
     }
 
-    // ============ FIXED METHODS - REMOVED UNUSED PARAMETERS ============
     async sendSecurityAlert(email: string, ipAddress: string): Promise<void> {
         this.logger.log(`Security alert sent to ${email} - IP: ${ipAddress}`);
     }
@@ -205,11 +206,7 @@ export class NotificationService {
 
     async sendPhoneVerifiedNotification(phoneNumber: string): Promise<void> {
         try {
-            await this.smsService.sendMessage(
-                phoneNumber,
-                'Your phone number has been verified successfully. Thank you for securing your account.'
-            );
-
+            await this.smsService.sendVerificationCode(phoneNumber, 'verified');
             this.logger.log(`Phone verification notification sent to: ${phoneNumber}`);
         } catch (error) {
             this.logger.error(`Failed to send phone verification notification: ${error.message}`);

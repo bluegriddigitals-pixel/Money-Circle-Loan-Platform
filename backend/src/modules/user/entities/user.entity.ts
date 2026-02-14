@@ -52,7 +52,7 @@ import { ComplianceCheck } from '../../compliance/entities/compliance-check.enti
 import { Kyc } from '../../compliance/entities/kyc.entity';
 import { KycStatus } from '../../compliance/entities/kyc.entity';
 
-
+export { KycStatus } from '../../compliance/entities/kyc.entity';
 
 export enum UserRole {
   BORROWER = 'borrower',
@@ -77,6 +77,8 @@ export enum AccountStatus {
   DEACTIVATED = 'DEACTIVATED',
   UNDER_REVIEW = 'UNDER_REVIEW',
   REJECTED = 'REJECTED',
+  FROZEN = 'FROZEN',           
+  RESTRICTED = 'RESTRICTED',   
 }
 
 export enum VerificationStatus {
@@ -101,6 +103,8 @@ export enum SubscriptionTier {
   PREMIUM = 'premium',
   ENTERPRISE = 'enterprise',
 }
+
+
 
 @Entity('users')
 @Index(['email'], { unique: true, where: 'deleted_at IS NULL' })
