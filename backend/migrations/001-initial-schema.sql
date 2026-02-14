@@ -1,10 +1,4 @@
--- C:\Users\success.maswanganyi\OneDrive - National Department of Human Settlements\Documents\GitHub\Money-Circle-Loan-Platform\backend\migrations\001-initial-schema.sql
-
--- MoneyCircle Loan Platform - Initial Database Schema
--- Migration: 001-initial-schema
--- Author: MoneyCircle Team
--- Date: 2024-XX-XX
-
+psql -U postgres -h localhost -d moneycircle << 'EOF'
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
@@ -164,13 +158,7 @@ CREATE TABLE users (
     -- Timestamps
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    deactivated_at TIMESTAMP WITH TIME ZONE,
-    
-    -- Indexes
-    INDEX idx_users_email ON users(email),
-    INDEX idx_users_phone ON users(phone_number),
-    INDEX idx_users_status ON users(status),
-    INDEX idx_users_kyc_status ON users(kyc_status)
+    deactivated_at TIMESTAMP WITH TIME ZONE
 );
 
 -- User profiles (extended information)
@@ -208,10 +196,7 @@ CREATE TABLE user_profiles (
     metadata JSONB,
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    
-    INDEX idx_user_profiles_user_id ON user_profiles(user_id),
-    INDEX idx_user_profiles_credit_score ON user_profiles(credit_score)
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Loan products
@@ -227,8 +212,8 @@ CREATE TABLE loan_products (
     min_tenure_months INTEGER NOT NULL,
     max_tenure_months INTEGER NOT NULL,
     interest_rate DECIMAL(5,2) NOT NULL,
-    interest_type VARCHAR(50) DEFAULT 'fixed', -- fixed, reducing
-    calculation_method VARCHAR(50) DEFAULT 'flat', -- flat, reducing_balance
+    interest_type VARCHAR(50) DEFAULT 'fixed',
+    calculation_method VARCHAR(50) DEFAULT 'flat',
     
     -- Fees
     processing_fee_percent DECIMAL(5,2) DEFAULT 0,
@@ -240,7 +225,7 @@ CREATE TABLE loan_products (
     -- Eligibility
     min_credit_score INTEGER DEFAULT 0,
     min_monthly_income DECIMAL(15,2) DEFAULT 0,
-    allowed_employment_status TEXT[], -- Array of allowed statuses
+    allowed_employment_status TEXT[],
     min_age INTEGER DEFAULT 18,
     max_age INTEGER DEFAULT 65,
     
@@ -250,10 +235,7 @@ CREATE TABLE loan_products (
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    created_by UUID REFERENCES users(id),
-    
-    INDEX idx_loan_products_code ON loan_products(code),
-    INDEX idx_loan_products_active ON loan_products(is_active)
+    created_by UUID REFERENCES users(id)
 );
 
 -- Loan applications
@@ -292,19 +274,14 @@ CREATE TABLE loan_applications (
     submitted_at TIMESTAMP WITH TIME ZONE,
     expires_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    
-    -- Indexes
-    INDEX idx_loan_applications_user_id ON loan_applications(user_id),
-    INDEX idx_loan_applications_status ON loan_applications(status),
-    INDEX idx_loan_applications_application_number ON loan_applications(application_number)
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Loans (approved applications)
 CREATE TABLE loans (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     loan_number VARCHAR(50) UNIQUE NOT NULL,
-    loan_application_id UUID UNIQUE REFERENCES loan_appliclications(id),
+    loan_application_id UUID UNIQUE REFERENCES loan_applications(id),
     borrower_id UUID NOT NULL REFERENCES users(id),
     loan_product_id UUID NOT NULL REFERENCES loan_products(id),
     
@@ -317,7 +294,7 @@ CREATE TABLE loans (
     
     -- Financial details
     total_interest DECIMAL(15,2) NOT NULL,
-    total_amount DECIMAL(15,2) NOT NULL, -- principal + interest
+    total_amount DECIMAL(15,2) NOT NULL,
     processing_fee DECIMAL(15,2) DEFAULT 0,
     disbursement_fee DECIMAL(15,2) DEFAULT 0,
     insurance_fee DECIMAL(15,2) DEFAULT 0,
@@ -339,17 +316,11 @@ CREATE TABLE loans (
     
     -- Funding information
     is_fully_funded BOOLEAN DEFAULT FALSE,
-    funding_progress DECIMAL(5,2) DEFAULT 0, -- Percentage
+    funding_progress DECIMAL(5,2) DEFAULT 0,
     funding_deadline DATE,
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    
-    -- Indexes
-    INDEX idx_loans_borrower_id ON loans(borrower_id),
-    INDEX idx_loans_status ON loans(status),
-    INDEX idx_loans_loan_number ON loans(loan_number),
-    INDEX idx_loans_fully_funded ON loans(is_fully_funded)
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Loan repayment schedule
@@ -379,11 +350,7 @@ CREATE TABLE loan_repayment_schedule (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     
-    -- Constraints and indexes
-    UNIQUE(loan_id, installment_number),
-    INDEX idx_repayment_schedule_loan_id ON loan_repayment_schedule(loan_id),
-    INDEX idx_repayment_schedule_due_date ON loan_repayment_schedule(due_date),
-    INDEX idx_repayment_schedule_status ON loan_repayment_schedule(status)
+    UNIQUE(loan_id, installment_number)
 );
 
 -- Loan investments (lenders funding loans)
@@ -394,7 +361,7 @@ CREATE TABLE loan_investments (
     
     -- Investment details
     amount DECIMAL(15,2) NOT NULL,
-    percentage_owned DECIMAL(5,2) NOT NULL, -- Percentage of the loan owned
+    percentage_owned DECIMAL(5,2) NOT NULL,
     
     -- Returns
     expected_interest DECIMAL(15,2) NOT NULL,
@@ -402,18 +369,14 @@ CREATE TABLE loan_investments (
     expected_total_return DECIMAL(15,2) NOT NULL,
     
     -- Status
-    status VARCHAR(50) DEFAULT 'active', -- active, completed, defaulted, sold
+    status VARCHAR(50) DEFAULT 'active',
     investment_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     maturity_date DATE,
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     
-    -- Constraints and indexes
-    UNIQUE(loan_id, lender_id),
-    INDEX idx_loan_investments_loan_id ON loan_investments(loan_id),
-    INDEX idx_loan_investments_lender_id ON loan_investments(lender_id),
-    INDEX idx_loan_investments_status ON loan_investments(status)
+    UNIQUE(loan_id, lender_id)
 );
 
 -- Wallets (user accounts for money management)
@@ -423,8 +386,7 @@ CREATE TABLE wallets (
     
     -- Balances
     available_balance DECIMAL(15,2) DEFAULT 0,
-    locked_balance DECIMAL(15,2) DEFAULT 0, -- For investments in progress
-    total_balance DECIMAL(15,2) GENERATED ALWAYS AS (available_balance + locked_balance) STORED,
+    locked_balance DECIMAL(15,2) DEFAULT 0,
     
     -- Limits
     withdrawal_limit_daily DECIMAL(15,2) DEFAULT 50000,
@@ -436,11 +398,7 @@ CREATE TABLE wallets (
     is_active BOOLEAN DEFAULT TRUE,
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    
-    -- Indexes
-    INDEX idx_wallets_user_id ON wallets(user_id),
-    INDEX idx_wallets_wallet_number ON wallets(wallet_number)
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Transactions
@@ -478,14 +436,7 @@ CREATE TABLE transactions (
     completed_at TIMESTAMP WITH TIME ZONE,
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    
-    -- Indexes
-    INDEX idx_transactions_user_id ON transactions(user_id),
-    INDEX idx_transactions_type ON transactions(type),
-    INDEX idx_transactions_status ON transactions(status),
-    INDEX idx_transactions_reference ON transactions(transaction_reference),
-    INDEX idx_transactions_created_at ON transactions(created_at)
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- User documents (KYC and other documents)
@@ -516,12 +467,7 @@ CREATE TABLE user_documents (
     expiry_date DATE,
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    
-    -- Indexes
-    INDEX idx_user_documents_user_id ON user_documents(user_id),
-    INDEX idx_user_documents_type ON user_documents(type),
-    INDEX idx_user_documents_is_verified ON user_documents(is_verified)
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Audit logs (for compliance and tracking)
@@ -547,12 +493,7 @@ CREATE TABLE audit_logs (
     request_id VARCHAR(100),
     status_code INTEGER,
     
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    
-    -- Indexes
-    INDEX idx_audit_logs_user_id ON audit_logs(user_id),
-    INDEX idx_audit_logs_entity_type ON audit_logs(entity_type),
-    INDEX idx_audit_logs_created_at ON audit_logs(created_at)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Notifications
@@ -575,12 +516,7 @@ CREATE TABLE notifications (
     delivered_at TIMESTAMP WITH TIME ZONE,
     read_at TIMESTAMP WITH TIME ZONE,
     
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    
-    -- Indexes
-    INDEX idx_notifications_user_id ON notifications(user_id),
-    INDEX idx_notifications_is_read ON notifications(is_read),
-    INDEX idx_notifications_created_at ON notifications(created_at)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- ==================== RELATIONSHIP TABLES ====================
@@ -593,9 +529,7 @@ CREATE TABLE user_role_history (
     new_role user_role NOT NULL,
     changed_by UUID REFERENCES users(id),
     reason TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    
-    INDEX idx_user_role_history_user_id ON user_role_history(user_id)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Loan guarantors
@@ -616,10 +550,82 @@ CREATE TABLE loan_guarantors (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     
-    UNIQUE(loan_id, user_id),
-    INDEX idx_loan_guarantors_loan_id ON loan_guarantors(loan_id),
-    INDEX idx_loan_guarantors_user_id ON loan_guarantors(user_id)
+    UNIQUE(loan_id, user_id)
 );
+
+-- ==================== INDEXES ====================
+
+-- Users indexes
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_phone ON users(phone_number);
+CREATE INDEX idx_users_status ON users(status);
+CREATE INDEX idx_users_kyc_status ON users(kyc_status);
+CREATE INDEX idx_users_role_status ON users(role, status);
+
+-- User profiles indexes
+CREATE INDEX idx_user_profiles_user_id ON user_profiles(user_id);
+CREATE INDEX idx_user_profiles_credit_score ON user_profiles(credit_score);
+
+-- Loan products indexes
+CREATE INDEX idx_loan_products_code ON loan_products(code);
+CREATE INDEX idx_loan_products_active ON loan_products(is_active);
+
+-- Loan applications indexes
+CREATE INDEX idx_loan_applications_user_id ON loan_applications(user_id);
+CREATE INDEX idx_loan_applications_status ON loan_applications(status);
+CREATE INDEX idx_loan_applications_application_number ON loan_applications(application_number);
+
+-- Loans indexes
+CREATE INDEX idx_loans_borrower_id ON loans(borrower_id);
+CREATE INDEX idx_loans_status ON loans(status);
+CREATE INDEX idx_loans_loan_number ON loans(loan_number);
+CREATE INDEX idx_loans_fully_funded ON loans(is_fully_funded);
+CREATE INDEX idx_loans_status_dates ON loans(status, disbursement_date, expected_completion_date);
+
+-- Repayment schedule indexes
+CREATE INDEX idx_repayment_schedule_loan_id ON loan_repayment_schedule(loan_id);
+CREATE INDEX idx_repayment_schedule_due_date ON loan_repayment_schedule(due_date);
+CREATE INDEX idx_repayment_schedule_status ON loan_repayment_schedule(status);
+CREATE INDEX idx_repayment_due_status ON loan_repayment_schedule(due_date, status);
+
+-- Loan investments indexes
+CREATE INDEX idx_loan_investments_loan_id ON loan_investments(loan_id);
+CREATE INDEX idx_loan_investments_lender_id ON loan_investments(lender_id);
+CREATE INDEX idx_loan_investments_status ON loan_investments(status);
+
+-- Wallets indexes
+CREATE INDEX idx_wallets_user_id ON wallets(user_id);
+CREATE INDEX idx_wallets_wallet_number ON wallets(wallet_number);
+
+-- Transactions indexes
+CREATE INDEX idx_transactions_user_id ON transactions(user_id);
+CREATE INDEX idx_transactions_type ON transactions(type);
+CREATE INDEX idx_transactions_status ON transactions(status);
+CREATE INDEX idx_transactions_reference ON transactions(transaction_reference);
+CREATE INDEX idx_transactions_created_at ON transactions(created_at);
+CREATE INDEX idx_transactions_user_date ON transactions(user_id, created_at DESC);
+
+-- User documents indexes
+CREATE INDEX idx_user_documents_user_id ON user_documents(user_id);
+CREATE INDEX idx_user_documents_type ON user_documents(type);
+CREATE INDEX idx_user_documents_is_verified ON user_documents(is_verified);
+
+-- Audit logs indexes
+CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id);
+CREATE INDEX idx_audit_logs_entity_type ON audit_logs(entity_type);
+CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
+
+-- Notifications indexes
+CREATE INDEX idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX idx_notifications_is_read ON notifications(is_read);
+CREATE INDEX idx_notifications_created_at ON notifications(created_at);
+
+-- User role history indexes
+CREATE INDEX idx_user_role_history_user_id ON user_role_history(user_id);
+
+-- Loan guarantors indexes
+CREATE INDEX idx_loan_guarantors_loan_id ON loan_guarantors(loan_id);
+CREATE INDEX idx_loan_guarantors_user_id ON loan_guarantors(user_id);
 
 -- ==================== FUNCTIONS AND TRIGGERS ====================
 
@@ -660,8 +666,7 @@ RETURNS TRIGGER AS $$
 DECLARE
     wallet_seq INTEGER;
 BEGIN
-    -- Get next sequence value for wallet
-    SELECT COALESCE(MAX(SUBSTRING(wallet_number FROM 8)::INTEGER), 0) + 1 
+    SELECT COALESCE(MAX(SUBSTRING(wallet_number FROM 3)::INTEGER), 0) + 1 
     INTO wallet_seq 
     FROM wallets;
     
@@ -682,7 +687,7 @@ DECLARE
 BEGIN
     year_month := TO_CHAR(NOW(), 'YYYYMM');
     
-    SELECT COALESCE(MAX(SUBSTRING(application_number FROM 12)::INTEGER), 0) + 1 
+    SELECT COALESCE(MAX(SUBSTRING(application_number FROM 9)::INTEGER), 0) + 1 
     INTO app_seq 
     FROM loan_applications 
     WHERE application_number LIKE 'APP-' || year_month || '-%';
@@ -704,7 +709,7 @@ DECLARE
 BEGIN
     year_month := TO_CHAR(NOW(), 'YYYYMM');
     
-    SELECT COALESCE(MAX(SUBSTRING(loan_number FROM 11)::INTEGER), 0) + 1 
+    SELECT COALESCE(MAX(SUBSTRING(loan_number FROM 9)::INTEGER), 0) + 1 
     INTO loan_seq 
     FROM loans 
     WHERE loan_number LIKE 'LOAN-' || year_month || '-%';
@@ -717,30 +722,4 @@ $$ language 'plpgsql';
 CREATE TRIGGER set_loan_number BEFORE INSERT ON loans
     FOR EACH ROW EXECUTE FUNCTION generate_loan_number();
 
--- ==================== INDEXES FOR PERFORMANCE ====================
-
--- Composite indexes for common queries
-CREATE INDEX idx_users_role_status ON users(role, status);
-CREATE INDEX idx_loans_status_dates ON loans(status, disbursement_date, expected_completion_date);
-CREATE INDEX idx_transactions_user_date ON transactions(user_id, created_at DESC);
-CREATE INDEX idx_repayment_due_status ON loan_repayment_schedule(due_date, status);
-
--- ==================== COMMENTS ====================
-
-COMMENT ON TABLE users IS 'Main user accounts for all platform participants';
-COMMENT ON TABLE user_profiles IS 'Extended user information and financial profiles';
-COMMENT ON TABLE loan_products IS 'Available loan products with terms and conditions';
-COMMENT ON TABLE loan_applications IS 'Loan applications submitted by borrowers';
-COMMENT ON TABLE loans IS 'Approved and active loans';
-COMMENT ON TABLE loan_repayment_schedule IS 'Repayment schedule for each loan';
-COMMENT ON TABLE loan_investments IS 'Investments made by lenders into loans';
-COMMENT ON TABLE wallets IS 'User wallets for holding funds';
-COMMENT ON TABLE transactions IS 'All financial transactions on the platform';
-COMMENT ON TABLE user_documents IS 'KYC and supporting documents uploaded by users';
-COMMENT ON TABLE audit_logs IS 'Audit trail for compliance and security';
-COMMENT ON TABLE notifications IS 'User notifications and alerts';
-
 -- ==================== MIGRATION COMPLETE ====================
-
--- Note: This is the initial schema. Additional migrations will be added
--- as the platform evolves with new features and optimizations.
