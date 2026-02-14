@@ -1,22 +1,19 @@
+// payment-method.enum.ts
+export enum PaymentMethodStatus {
+  PENDING = 'pending',
+  ACTIVE = 'active',
+  INACTIVE = 'inactive',
+  VERIFIED = 'verified',
+  EXPIRED = 'expired',
+  FAILED = 'failed',
+}
+
 export enum PaymentMethodType {
   CREDIT_CARD = 'credit_card',
   DEBIT_CARD = 'debit_card',
   BANK_ACCOUNT = 'bank_account',
   DIGITAL_WALLET = 'digital_wallet',
   CASH = 'cash',
-  CHECK = 'check',
-  BANK_TRANSFER = 'bank_transfer',
-  MOBILE_MONEY = 'mobile_money',
-  CRYPTO = 'crypto',
-}
-
-export enum PaymentMethodStatus {
-  ACTIVE = 'ACTIVE',
-  INACTIVE = 'INACTIVE',
-  PENDING = 'PENDING',  // Add this if missing
-  VERIFIED = 'VERIFIED',
-  EXPIRED = 'EXPIRED',
-  FAILED = 'FAILED',
 }
 
 export enum CardType {
@@ -24,16 +21,12 @@ export enum CardType {
   MASTERCARD = 'mastercard',
   AMEX = 'amex',
   DISCOVER = 'discover',
-  DINERS_CLUB = 'diners_club',
   JCB = 'jcb',
   UNIONPAY = 'unionpay',
-  OTHER = 'other',
 }
 
 export enum AccountType {
   CHECKING = 'checking',
   SAVINGS = 'savings',
-  MONEY_MARKET = 'money_market',
-  BUSINESS_CHECKING = 'business_checking',
-  BUSINESS_SAVINGS = 'business_savings',
+  BUSINESS = 'business',
 }

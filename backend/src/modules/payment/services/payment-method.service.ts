@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
-import { PaymentMethod, PaymentMethodStatus } from '../entities/payment-method.entity';
+import { PaymentMethod } from '../entities/payment-method.entity';
 import { CreatePaymentMethodDto } from '../dto/create-payment-method.dto';
+import { PaymentMethodStatus, PaymentMethodType } from '../enums/payment-method.enum';
 
 @Injectable()
 export class PaymentMethodService {
@@ -12,34 +13,31 @@ export class PaymentMethodService {
   ) {}
 
   async create(createPaymentMethodDto: CreatePaymentMethodDto): Promise<PaymentMethod> {
-    // Create a new payment method instance
-    const paymentMethod = new PaymentMethod();
+    const paymentMethodData: Partial<PaymentMethod> = {
+      userId: createPaymentMethodDto.userId,
+      type: createPaymentMethodDto.type,
+      status: PaymentMethodStatus.PENDING,
+      lastFour: createPaymentMethodDto.lastFour,
+      name: createPaymentMethodDto.holderName, // Map holderName to name
+      bankName: createPaymentMethodDto.bankName,
+      gatewayToken: createPaymentMethodDto.gatewayToken,
+      gatewayCustomerId: createPaymentMethodDto.gatewayCustomerId,
+      billingAddress: createPaymentMethodDto.billingAddress,
+      isDefault: createPaymentMethodDto.isDefault || false,
+      isVerified: false,
+      metadata: createPaymentMethodDto.metadata || {},
+      expiryMonth: createPaymentMethodDto.expiryMonth,
+      expiryYear: createPaymentMethodDto.expiryYear,
+    };
     
-    // Only assign properties that exist in the entity
-    paymentMethod.userId = createPaymentMethodDto.userId;
-    paymentMethod.type = createPaymentMethodDto.type as any; // ✅ Type assertion to fix enum mismatch
-    paymentMethod.lastFour = createPaymentMethodDto.lastFour;
-    paymentMethod.name = createPaymentMethodDto.holderName; // Entity uses 'name', DTO uses 'holderName'
-    paymentMethod.bankName = createPaymentMethodDto.bankName;
-    paymentMethod.gatewayToken = createPaymentMethodDto.gatewayToken;
-    paymentMethod.gatewayCustomerId = createPaymentMethodDto.gatewayCustomerId;
-    paymentMethod.billingAddress = createPaymentMethodDto.billingAddress;
-    paymentMethod.isDefault = createPaymentMethodDto.isDefault || false;
-    paymentMethod.metadata = createPaymentMethodDto.metadata;
-    paymentMethod.expiryMonth = createPaymentMethodDto.expiryMonth;
-    paymentMethod.expiryYear = createPaymentMethodDto.expiryYear;
-    
-    // Set initial status
-    paymentMethod.status = PaymentMethodStatus.PENDING;
-    paymentMethod.isVerified = false;
-
+    const paymentMethod = this.paymentMethodRepository.create(paymentMethodData);
     return this.paymentMethodRepository.save(paymentMethod);
   }
 
   async findOne(id: string): Promise<PaymentMethod> {
     const method = await this.paymentMethodRepository.findOne({
       where: { id },
-      relations: ['user'],
+      relations: ['user', 'transactions'],
     });
     
     if (!method) {
@@ -65,28 +63,45 @@ export class PaymentMethodService {
     });
   }
 
-  async setDefault(userId: string, paymentMethodId: string): Promise<void> {
-    // First, verify the payment method exists and belongs to the user
+  async setDefault(userId: string, paymentMethodId: string): Promise<PaymentMethod> {
     const method = await this.findOne(paymentMethodId);
     
     if (method.userId !== userId) {
       throw new BadRequestException('Payment method does not belong to this user');
     }
 
-    // Remove default from all user's payment methods
+    // Remove default from all other user methods
     await this.paymentMethodRepository.update(
       { userId, isDefault: true },
       { isDefault: false }
     );
 
-    // Set the new default
+    // Set this as default
     method.isDefault = true;
-    await this.paymentMethodRepository.save(method);
+    
+    return this.paymentMethodRepository.save(method);
   }
 
-  async verify(id: string, verificationMethod: string): Promise<PaymentMethod> {
+  async verify(id: string): Promise<PaymentMethod> {
     const paymentMethod = await this.findOne(id);
-    paymentMethod.verify(verificationMethod);
+    
+    paymentMethod.status = PaymentMethodStatus.VERIFIED;
+    paymentMethod.isVerified = true;
+    
+    // Store verification date in metadata
+    paymentMethod.metadata = {
+      ...paymentMethod.metadata,
+      verifiedAt: new Date().toISOString(),
+    };
+    
+    return this.paymentMethodRepository.save(paymentMethod);
+  }
+
+  async activate(id: string): Promise<PaymentMethod> {
+    const paymentMethod = await this.findOne(id);
+    
+    paymentMethod.status = PaymentMethodStatus.ACTIVE;
+    
     return this.paymentMethodRepository.save(paymentMethod);
   }
 
@@ -98,25 +113,61 @@ export class PaymentMethodService {
     }
 
     paymentMethod.status = PaymentMethodStatus.INACTIVE;
+    
+    // Store deactivation info in metadata
     paymentMethod.metadata = {
       ...paymentMethod.metadata,
-      deactivatedAt: new Date(),
+      deactivatedAt: new Date().toISOString(),
       deactivationReason: reason,
     };
 
     return this.paymentMethodRepository.save(paymentMethod);
   }
 
-  async recordTransaction(id: string, amount: number): Promise<void> {
+  async recordTransaction(id: string, amount: number): Promise<PaymentMethod> {
     const paymentMethod = await this.findOne(id);
-    paymentMethod.recordTransaction(amount);
-    await this.paymentMethodRepository.save(paymentMethod);
+    
+    // Track transaction stats in metadata
+    const currentStats = paymentMethod.metadata?.transactionStats || { 
+      count: 0, 
+      totalAmount: 0,
+    };
+    
+    paymentMethod.metadata = {
+      ...paymentMethod.metadata,
+      transactionStats: {
+        count: (currentStats.count || 0) + 1,
+        totalAmount: (currentStats.totalAmount || 0) + amount,
+        lastAmount: amount,
+        lastTransactionDate: new Date().toISOString()
+      }
+    };
+    
+    paymentMethod.lastUsedAt = new Date();
+    
+    return this.paymentMethodRepository.save(paymentMethod);
   }
 
   async getUserDefaultPaymentMethod(userId: string): Promise<PaymentMethod | null> {
     return this.paymentMethodRepository.findOne({
       where: { userId, isDefault: true },
     });
+  }
+
+  async getVerifiedMethods(userId: string): Promise<PaymentMethod[]> {
+    return this.paymentMethodRepository.find({
+      where: { 
+        userId, 
+        status: In([PaymentMethodStatus.VERIFIED, PaymentMethodStatus.ACTIVE])
+      },
+      order: { isDefault: 'DESC', createdAt: 'DESC' },
+    });
+  }
+
+  async update(id: string, updateData: Partial<PaymentMethod>): Promise<PaymentMethod> {
+    const paymentMethod = await this.findOne(id);
+    Object.assign(paymentMethod, updateData);
+    return this.paymentMethodRepository.save(paymentMethod);
   }
 
   async delete(id: string): Promise<void> {
@@ -126,11 +177,31 @@ export class PaymentMethodService {
       throw new BadRequestException('Cannot delete default payment method');
     }
 
-    await this.paymentMethodRepository.softRemove(paymentMethod);
+    await this.paymentMethodRepository.softDelete(id);
   }
 
   async restore(id: string): Promise<PaymentMethod> {
     await this.paymentMethodRepository.restore(id);
     return this.findOne(id);
+  }
+
+  async getExpiringMethods(month: number, year: number): Promise<PaymentMethod[]> {
+    return this.paymentMethodRepository.find({
+      where: {
+        expiryMonth: month,
+        expiryYear: year,
+        status: In([PaymentMethodStatus.ACTIVE, PaymentMethodStatus.VERIFIED]),
+      },
+    });
+  }
+
+  async getTransactionStats(id: string): Promise<any> {
+    const paymentMethod = await this.findOne(id);
+    return paymentMethod.metadata?.transactionStats || { 
+      count: 0, 
+      totalAmount: 0,
+      lastAmount: null,
+      lastTransactionDate: null
+    };
   }
 }

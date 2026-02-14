@@ -11,6 +11,7 @@ import {
     IsEmail,
     IsPhoneNumber,
     IsObject,
+    IsArray,
 } from 'class-validator';
 import { PayoutRequestType, PayoutMethod } from '../enums/payout.enum';
 
@@ -125,6 +126,7 @@ export class CreatePayoutRequestDto {
         ],
     })
     @IsOptional()
+    @IsArray()
     supportingDocuments?: Array<{
         type: string;
         url: string;

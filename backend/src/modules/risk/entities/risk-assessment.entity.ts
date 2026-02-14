@@ -52,3 +52,4 @@ export class RiskAssessment {
   @UpdateDateColumn()
   updatedAt: Date;
 }
+// REMOVE THIS LINE: export { RiskAssessment };

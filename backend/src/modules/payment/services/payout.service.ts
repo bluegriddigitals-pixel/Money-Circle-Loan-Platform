@@ -18,7 +18,7 @@ import { CreateDisbursementDto } from '../dto/create-disbursement.dto';
 import { ProcessPaymentDto } from '../dto/process-payment.dto';
 import { TransferFundsDto } from '../dto/transfer-funds.dto';
 import { ApprovePayoutDto } from '../dto/approve-payout.dto';
-import { ScheduleDisbursementDto } from '../dto/schedule-disbursement.dto'
+import { ScheduleDisbursementDto } from '../dto/schedule-disbursement.dto';
 
 import { 
     TransactionStatus, 
@@ -33,7 +33,9 @@ import {
 } from '../enums/payment-method.enum';
 import { 
     PayoutRequestStatus, 
-    PayoutRequestType 
+    PayoutRequestType,
+    PayoutMethod,
+    PayoutPriority
 } from '../enums/payout.enum';
 import { 
     DisbursementStatus 
@@ -41,9 +43,10 @@ import {
 
 import { NotificationService } from '../../notification/notification.service';
 import { LoanService } from '../../loan/loan.service';
+
 @Injectable()
 export class PayoutService  {
-    private readonly logger = new Logger(PayoutService .name);
+    private readonly logger = new Logger(PayoutService.name);
 
     constructor(
         @InjectRepository(Transaction)
@@ -62,10 +65,6 @@ export class PayoutService  {
         private readonly loanService: LoanService,
     ) { }
 
-    // ============================================
-    // UTILITY METHODS
-    // ============================================
-
     private generateTransactionNumber(prefix: string = 'TXN'): string {
         return `${prefix}-${new Date().getFullYear()}-${uuidv4().slice(0, 8).toUpperCase()}`;
     }
@@ -81,10 +80,6 @@ export class PayoutService  {
     private generateAccountNumber(): string {
         return `ESC-${new Date().getFullYear()}-${uuidv4().slice(0, 8).toUpperCase()}`;
     }
-
-    // ============================================
-    // TRANSACTION METHODS
-    // ============================================
 
     async createTransaction(createTransactionDto: CreateTransactionDto): Promise<Transaction> {
         const queryRunner = this.dataSource.createQueryRunner();
@@ -411,10 +406,6 @@ export class PayoutService  {
         return this.refundTransaction(data.transactionId, data.reason);
     }
 
-    // ============================================
-    // ESCROW ACCOUNT METHODS
-    // ============================================
-
     async createEscrowAccount(createEscrowAccountDto: CreateEscrowAccountDto): Promise<EscrowAccount> {
         const escrowAccount = new EscrowAccount();
         const accountNumber = this.generateAccountNumber();
@@ -688,10 +679,6 @@ export class PayoutService  {
         return updatedAccount;
     }
 
-    // ============================================
-    // PAYMENT METHOD METHODS
-    // ============================================
-
     async createPaymentMethod(createPaymentMethodDto: CreatePaymentMethodDto): Promise<PaymentMethod> {
         const existingMethods = await this.paymentMethodRepository.count({
             where: { userId: createPaymentMethodDto.userId },
@@ -847,10 +834,6 @@ export class PayoutService  {
         return this.deactivatePaymentMethod(id, 'Removed by user');
     }
 
-    // ============================================
-    // PAYOUT REQUEST METHODS
-    // ============================================
-
     async createPayoutRequest(createPayoutRequestDto: CreatePayoutRequestDto): Promise<PayoutRequest> {
         if (createPayoutRequestDto.escrowAccountId) {
             const escrowAccount = await this.escrowAccountRepository.findOne({
@@ -873,6 +856,8 @@ export class PayoutService  {
             ...createPayoutRequestDto,
             requestNumber,
             status: PayoutRequestStatus.PENDING,
+            priority: PayoutPriority.MEDIUM,
+            currency: 'USD',
         });
 
         const savedRequest = await this.payoutRequestRepository.save(payoutRequest);
@@ -939,7 +924,9 @@ export class PayoutService  {
     }
 
     async approvePayout(id: string, approvedBy: string): Promise<PayoutRequest> {
-        return this.approvePayoutRequest(id, { approvedBy });
+        const approvePayoutDto = new ApprovePayoutDto();
+        approvePayoutDto.approvedBy = approvedBy;
+        return this.approvePayoutRequest(id, approvePayoutDto);
     }
 
     async approvePayoutRequest(payoutRequestId: string, approvePayoutDto: ApprovePayoutDto): Promise<PayoutRequest> {
@@ -1020,6 +1007,10 @@ export class PayoutService  {
         return updatedRequest;
     }
 
+    async rejectPayoutRequestWithDto(payoutRequestId: string, rejectPayoutDto: any): Promise<PayoutRequest> {
+        return this.rejectPayoutRequest(payoutRequestId, rejectPayoutDto.rejectedBy, rejectPayoutDto.reason);
+    }
+
     async processPayoutRequest(payoutRequestId: string): Promise<{ payoutRequest: PayoutRequest; transaction?: Transaction }> {
         const queryRunner = this.dataSource.createQueryRunner();
         await queryRunner.connect();
@@ -1060,11 +1051,12 @@ export class PayoutService  {
                 };
             }
 
-            if (payoutRequestToProcess.payoutMethod === 'bank_transfer' || payoutRequestToProcess.payoutMethod === 'wire_transfer') {
+            if (payoutRequestToProcess.payoutMethod === PayoutMethod.BANK_TRANSFER || 
+                payoutRequestToProcess.payoutMethod === PayoutMethod.WIRE_TRANSFER) {
                 try {
                     const processorResponse = await this.paymentProcessorService.processPayout({
-                        amount: payoutRequestToProcess.netAmount,
-                        currency: 'USD',
+                        amount: payoutRequestToProcess.netAmount || payoutRequestToProcess.amount,
+                        currency: payoutRequestToProcess.currency || 'USD',
                         recipientDetails: {
                             name: payoutRequestToProcess.recipientName,
                             email: payoutRequestToProcess.recipientEmail,
@@ -1090,6 +1082,7 @@ export class PayoutService  {
             }
 
             payoutRequestToProcess.status = PayoutRequestStatus.COMPLETED;
+            payoutRequestToProcess.completedAt = new Date();
             await queryRunner.manager.save(payoutRequestToProcess);
 
             await queryRunner.commitTransaction();
@@ -1106,10 +1099,6 @@ export class PayoutService  {
             await queryRunner.release();
         }
     }
-
-    // ============================================
-    // DISBURSEMENT METHODS
-    // ============================================
 
     async createDisbursement(createDisbursementDto: CreateDisbursementDto): Promise<Disbursement> {
         const loan = await this.loanService.getLoanById(createDisbursementDto.loanId);
@@ -1291,10 +1280,6 @@ export class PayoutService  {
         return updatedDisbursement;
     }
 
-    // ============================================
-    // BATCH PROCESSING METHODS
-    // ============================================
-
     async processScheduledDisbursements(): Promise<{ processed: number; failed: number }> {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -1350,10 +1335,6 @@ export class PayoutService  {
         this.logger.log(`Processed ${processed} payout requests, ${failed} failed`);
         return { processed, failed };
     }
-
-    // ============================================
-    // REPORTING METHODS
-    // ============================================
 
     async getPaymentSummary(userId: string, startDate?: Date, endDate?: Date) {
         const query = this.transactionRepository.createQueryBuilder('transaction')
@@ -1467,10 +1448,6 @@ export class PayoutService  {
         };
     }
 
-    // ============================================
-    // UTILITY METHODS
-    // ============================================
-
     async validatePaymentMethodForUser(userId: string, paymentMethodId: string): Promise<boolean> {
         const paymentMethod = await this.paymentMethodRepository.findOne({
             where: { id: paymentMethodId, userId },
@@ -1507,15 +1484,15 @@ export class PayoutService  {
     }
 
     async calculateFees(amount: number): Promise<{ processingFee: number; tax: number; totalFees: number }> {
-    const processingFee = Math.max(2.5, amount * 0.029);
-    const tax = processingFee * 0.1;
+        const processingFee = Math.max(2.5, amount * 0.029);
+        const tax = processingFee * 0.1;
 
-    return {
-        processingFee: Math.round(processingFee * 100) / 100,
-        tax: Math.round(tax * 100) / 100,
-        totalFees: Math.round((processingFee + tax) * 100) / 100,
-    };
-}
+        return {
+            processingFee: Math.round(processingFee * 100) / 100,
+            tax: Math.round(tax * 100) / 100,
+            totalFees: Math.round((processingFee + tax) * 100) / 100,
+        };
+    }
 
     async healthCheck(): Promise<{ status: string; details: any }> {
         try {

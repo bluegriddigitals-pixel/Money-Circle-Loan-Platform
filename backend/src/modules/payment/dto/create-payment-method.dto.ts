@@ -13,7 +13,7 @@ import {
   IsBoolean,
   IsObject,
 } from 'class-validator';
-import { PaymentMethodType, CardType, AccountType } from "../enums/payment-method.enum";
+import { PaymentMethodType } from '../enums/payment-method.enum';
 
 export class CreatePaymentMethodDto {
   @ApiProperty({
@@ -31,24 +31,6 @@ export class CreatePaymentMethodDto {
   @IsEnum(PaymentMethodType)
   type: PaymentMethodType;
 
-  @ApiPropertyOptional({
-    description: 'Card type (if payment method is a card)',
-    enum: CardType,
-    example: CardType.VISA,
-  })
-  @IsOptional()
-  @IsEnum(CardType)
-  cardType?: CardType;
-
-  @ApiPropertyOptional({
-    description: 'Account type (if payment method is a bank account)',
-    enum: AccountType,
-    example: AccountType.CHECKING,
-  })
-  @IsOptional()
-  @IsEnum(AccountType)
-  accountType?: AccountType;
-
   @ApiProperty({
     description: 'Last four digits of the card/account',
     example: '1234',
@@ -57,7 +39,7 @@ export class CreatePaymentMethodDto {
   @IsNotEmpty()
   @MinLength(4)
   @MaxLength(4)
-  lastFour: string;  // ✅ FIXED: renamed from lastFourDigits to match entity
+  lastFour: string;
 
   @ApiProperty({
     description: 'Card/Account holder name',
@@ -66,13 +48,11 @@ export class CreatePaymentMethodDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
-  holderName: string;
+  holderName: string; // This maps to entity's 'name' field
 
   @ApiPropertyOptional({
     description: 'Card expiry month (1-12)',
     example: 12,
-    minimum: 1,
-    maximum: 12,
   })
   @IsOptional()
   @IsNumber()
@@ -83,7 +63,6 @@ export class CreatePaymentMethodDto {
   @ApiPropertyOptional({
     description: 'Card expiry year',
     example: 2026,
-    minimum: 2024,
   })
   @IsOptional()
   @IsNumber()

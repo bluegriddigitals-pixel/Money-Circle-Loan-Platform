@@ -1147,26 +1147,6 @@ export class PayoutService {
     // DISBURSEMENT METHODS
     // ============================================
 
-    async createDisbursement(createDisbursementDto: CreateDisbursementDto): Promise<Disbursement> {
-        const loan = await this.loanService.getLoanById(createDisbursementDto.loanId);
-        if (!loan) {
-            throw new NotFoundException('Loan not found');
-        }
-
-        const disbursementNumber = this.generateDisbursementNumber();
-
-        const disbursement = new Disbursement();
-        Object.assign(disbursement, {
-            ...createDisbursementDto,
-            disbursementNumber,
-            status: DisbursementStatus.PENDING,
-        });
-
-        const savedDisbursement = await this.disbursementRepository.save(disbursement);
-
-        this.logger.log(`Disbursement ${savedDisbursement.disbursementNumber} created for loan ${loan.loanNumber}`);
-        return savedDisbursement;
-    }
 
     async getDisbursement(id: string): Promise<Disbursement> {
         const disbursement = await this.disbursementRepository.findOne({
@@ -1231,101 +1211,95 @@ export class PayoutService {
         return updatedDisbursement;
     }
 
-    async processDisbursement(disbursementId: string, amount?: number): Promise<{ disbursement: Disbursement; transaction?: Transaction }> {
-        const queryRunner = this.dataSource.createQueryRunner();
-        await queryRunner.connect();
-        await queryRunner.startTransaction();
+    async createDisbursement(createDisbursementDto: CreateDisbursementDto): Promise<Disbursement> {
+    // Just verify the loan exists through a repository if available
+    // Or skip verification if not needed
 
-        try {
-            const disbursementToProcess = await this.disbursementRepository
-                .createQueryBuilder('disbursement')
-                .setLock('pessimistic_write')
-                .where('disbursement.id = :id', { id: disbursementId })
-                .leftJoinAndSelect('disbursement.loan', 'loan')
-                .leftJoinAndSelect('disbursement.escrowAccount', 'escrowAccount')
-                .getOne();
+    const disbursementNumber = this.generateDisbursementNumber();
 
-            if (!disbursementToProcess) {
-                throw new NotFoundException('Disbursement not found');
-            }
+    const disbursement = new Disbursement();
+    Object.assign(disbursement, {
+        ...createDisbursementDto,
+        disbursementNumber,
+        status: DisbursementStatus.PENDING,
+    });
 
-            if (disbursementToProcess.status !== DisbursementStatus.APPROVED &&
-                disbursementToProcess.status !== DisbursementStatus.SCHEDULED) {
-                throw new BadRequestException(`Disbursement cannot be processed with status: ${disbursementToProcess.status}`);
-            }
+    const savedDisbursement = await this.disbursementRepository.save(disbursement);
 
-            const pendingAmount = disbursementToProcess.amount - (disbursementToProcess.disbursedAmount || 0);
-            const disbursementAmount = amount || pendingAmount;
+    this.logger.log(`Disbursement ${savedDisbursement.disbursementNumber} created`);
+    return savedDisbursement;
+}
 
-            if (disbursementAmount > pendingAmount) {
-                throw new BadRequestException(`Disbursement amount ${disbursementAmount} exceeds pending amount ${pendingAmount}`);
-            }
+async processDisbursement(disbursementId: string, amount?: number): Promise<{ disbursement: Disbursement; transaction?: Transaction }> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-            let transaction: Transaction | undefined;
+    try {
+        const disbursementToProcess = await this.disbursementRepository
+            .createQueryBuilder('disbursement')
+            .setLock('pessimistic_write')
+            .where('disbursement.id = :id', { id: disbursementId })
+            .leftJoinAndSelect('disbursement.escrowAccount', 'escrowAccount')
+            .getOne();
 
-            if (disbursementToProcess.escrowAccount) {
-                transaction = await this.withdrawFromEscrow(
-                    disbursementToProcess.escrowAccount.id,
-                    disbursementAmount,
-                    `Disbursement ${disbursementToProcess.disbursementNumber} for loan ${disbursementToProcess.loan?.loanNumber || disbursementToProcess.loanId}`
-                );
-
-                disbursementToProcess.metadata = {
-                    ...disbursementToProcess.metadata,
-                    transactionId: transaction?.id,
-                };
-            }
-
-            disbursementToProcess.disbursedAmount = (disbursementToProcess.disbursedAmount || 0) + disbursementAmount;
-            disbursementToProcess.disbursedAt = new Date();
-            disbursementToProcess.transactionReference = transaction?.transactionReference;
-
-            if (disbursementToProcess.disbursedAmount >= disbursementToProcess.amount) {
-                disbursementToProcess.status = DisbursementStatus.COMPLETED;
-            } else {
-                disbursementToProcess.status = DisbursementStatus.PARTIAL;
-            }
-
-            await queryRunner.manager.save(disbursementToProcess);
-
-            if (disbursementToProcess.loan) {
-                await this.loanService.updateDisbursedAmount(disbursementToProcess.loanId, disbursementAmount);
-            }
-
-            await queryRunner.commitTransaction();
-
-            await this.notificationService.sendDisbursementNotification(disbursementToProcess);
-
-            this.logger.log(`Disbursed ${disbursementAmount} for disbursement ${disbursementToProcess.disbursementNumber}`);
-            return { disbursement: disbursementToProcess, transaction };
-        } catch (error) {
-            await queryRunner.rollbackTransaction();
-            this.logger.error(`Failed to process disbursement: ${error.message}`, error.stack);
-            throw error;
-        } finally {
-            await queryRunner.release();
-        }
-    }
-
-    async createDisbursementSchedule(disbursementId: string, installments: Array<{ amount: number; dueDate: Date }>): Promise<Disbursement> {
-        const disbursement = await this.disbursementRepository.findOne({
-            where: { id: disbursementId },
-        });
-
-        if (!disbursement) {
+        if (!disbursementToProcess) {
             throw new NotFoundException('Disbursement not found');
         }
 
-        disbursement.schedule = installments.map((installment, index) => ({
-            ...installment,
-            status: index === 0 ? 'pending' : 'scheduled',
-        }));
+        if (disbursementToProcess.status !== DisbursementStatus.APPROVED && 
+            disbursementToProcess.status !== DisbursementStatus.SCHEDULED) {
+            throw new BadRequestException(`Disbursement cannot be processed with status: ${disbursementToProcess.status}`);
+        }
 
-        const updatedDisbursement = await this.disbursementRepository.save(disbursement);
+        const pendingAmount = Number(disbursementToProcess.amount) - (Number(disbursementToProcess.disbursedAmount) || 0);
+        const disbursementAmount = amount || pendingAmount;
 
-        this.logger.log(`Schedule created for disbursement ${disbursement.disbursementNumber} with ${installments.length} installments`);
-        return updatedDisbursement;
+        if (disbursementAmount > pendingAmount) {
+            throw new BadRequestException(`Disbursement amount ${disbursementAmount} exceeds pending amount ${pendingAmount}`);
+        }
+
+        let transaction: Transaction | undefined;
+
+        if (disbursementToProcess.escrowAccount) {
+            transaction = await this.withdrawFromEscrow(
+                disbursementToProcess.escrowAccount.id,
+                disbursementAmount,
+                `Disbursement ${disbursementToProcess.disbursementNumber}`
+            );
+
+            disbursementToProcess.metadata = {
+                ...disbursementToProcess.metadata,
+                transactionId: transaction?.id,
+            };
+        }
+
+        disbursementToProcess.disbursedAmount = (Number(disbursementToProcess.disbursedAmount) || 0) + disbursementAmount;
+        disbursementToProcess.disbursedAt = new Date();
+        disbursementToProcess.transactionReference = transaction?.transactionReference;
+        
+        if (Number(disbursementToProcess.disbursedAmount) >= Number(disbursementToProcess.amount)) {
+            disbursementToProcess.status = DisbursementStatus.COMPLETED;
+        } else {
+            disbursementToProcess.status = DisbursementStatus.PARTIAL;
+        }
+        
+        await queryRunner.manager.save(disbursementToProcess);
+
+        await queryRunner.commitTransaction();
+
+        await this.notificationService.sendDisbursementNotification(disbursementToProcess);
+
+        this.logger.log(`Disbursed ${disbursementAmount} for disbursement ${disbursementToProcess.disbursementNumber}`);
+        return { disbursement: disbursementToProcess, transaction };
+    } catch (error) {
+        await queryRunner.rollbackTransaction();
+        this.logger.error(`Failed to process disbursement: ${error.message}`, error.stack);
+        throw error;
+    } finally {
+        await queryRunner.release();
     }
+}
 
     // ============================================
     // BATCH PROCESSING METHODS

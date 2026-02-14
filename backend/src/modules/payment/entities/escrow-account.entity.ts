@@ -21,7 +21,7 @@ export class EscrowAccount {
   @Column({
     type: 'enum',
     enum: EscrowAccountType,
-    default: EscrowAccountType.STANDARD
+    default: EscrowAccountType.LOAN // Changed from STANDARD to LOAN (which exists in your enum)
   })
   type: EscrowAccountType;
 

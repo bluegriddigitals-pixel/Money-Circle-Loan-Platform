@@ -38,13 +38,12 @@ export class CreateEscrowAccountDto {
   @ApiProperty({
     description: 'Escrow account type',
     enum: EscrowAccountType,
-    example: EscrowAccountType.STANDARD,  // Changed from GENERAL
-    default: EscrowAccountType.STANDARD,   // Changed from GENERAL
+    example: EscrowAccountType.LOAN,  // Changed from STANDARD to LOAN
+    default: EscrowAccountType.LOAN,   // Changed from STANDARD to LOAN
   })
   @IsEnum(EscrowAccountType)
-  type: EscrowAccountType = EscrowAccountType.STANDARD;  // Changed from GENERAL
+  type: EscrowAccountType = EscrowAccountType.LOAN;  // Changed from STANDARD to LOAN
 
-  // ... rest of the DTO remains the same
   @ApiPropertyOptional({
     description: 'Initial deposit amount',
     example: 50000.0,

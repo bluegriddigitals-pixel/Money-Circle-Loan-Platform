@@ -9,6 +9,7 @@ import {
     JoinColumn,
     Index,
     BeforeInsert,
+    OneToMany, // Add this if you want the inverse relation
 } from 'typeorm';
 import { Exclude, Expose } from 'class-transformer';
 import {
@@ -30,7 +31,8 @@ import {
 import { DecimalColumn } from '../../../shared/decorators/decimal-column.decorator';
 import { Loan } from '../../loan/entities/loan.entity';
 import { EscrowAccount } from './escrow-account.entity';
-import { PaymentMethod } from './payment-method.entity';  // FIXED: Correct path
+import { PaymentMethod } from './payment-method.entity';
+import { PayoutRequest } from './payout-request.entity'; // Add this import
 
 // ============================================
 // IMPORT ENUMS FROM ENUMS FOLDER - NOT DEFINED HERE
@@ -45,6 +47,7 @@ import {
 @Index(['loanId'])
 @Index(['escrowAccountId'])
 @Index(['paymentMethodId'])
+@Index(['payoutRequestId']) // Add index for payoutRequestId
 @Index(['type'])
 @Index(['status'])
 @Index(['createdAt'])
@@ -96,8 +99,17 @@ export class Transaction {
     paymentMethodId: string;
 
     @ApiPropertyOptional({
-        description: 'User ID who initiated the transaction',
+        description: 'ID of the associated payout request',
         example: '123e4567-e89b-12d3-a456-426614174004',
+    })
+    @Column({ type: 'uuid', nullable: true }) // Add this column
+    @IsOptional()
+    @IsUUID('4')
+    payoutRequestId: string;
+
+    @ApiPropertyOptional({
+        description: 'User ID who initiated the transaction',
+        example: '123e4567-e89b-12d3-a456-426614174005',
     })
     @Column({ type: 'uuid', nullable: true })
     @IsOptional()
@@ -278,7 +290,14 @@ export class Transaction {
         onDelete: 'SET NULL',
     })
     @JoinColumn({ name: 'paymentMethodId' })
-    paymentMethod: PaymentMethod;  // This property now exists
+    paymentMethod: PaymentMethod;
+
+    @ManyToOne(() => PayoutRequest, (payoutRequest) => payoutRequest.transactions, { // Add this relation
+        nullable: true,
+        onDelete: 'SET NULL',
+    })
+    @JoinColumn({ name: 'payoutRequestId' })
+    payoutRequest: PayoutRequest;
 
     // Lifecycle hooks
     @BeforeInsert()

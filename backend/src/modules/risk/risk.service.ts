@@ -12,11 +12,13 @@ export class RiskService {
 
   async createAssessment(createRiskDto: any): Promise<RiskAssessment> {
     const assessment = this.riskRepository.create(createRiskDto);
-    return this.riskRepository.save(assessment);
+    const saved = await this.riskRepository.save(assessment);
+    // If save returns an array, take the first item
+    return Array.isArray(saved) ? saved[0] : saved;
   }
 
   async findAll(): Promise<RiskAssessment[]> {
-    return this.riskRepository.find({
+    return await this.riskRepository.find({
       relations: ['user', 'loan'],
       order: { createdAt: 'DESC' },
     });
@@ -36,7 +38,7 @@ export class RiskService {
   }
 
   async findByUser(userId: string): Promise<RiskAssessment[]> {
-    return this.riskRepository.find({
+    return await this.riskRepository.find({
       where: { userId },
       relations: ['loan'],
       order: { createdAt: 'DESC' },
@@ -44,9 +46,15 @@ export class RiskService {
   }
 
   async update(id: string, updateRiskDto: any): Promise<RiskAssessment> {
-    const assessment = await this.findOne(id);
-    Object.assign(assessment, updateRiskDto);
-    return this.riskRepository.save(assessment);
+    await this.riskRepository.update(id, updateRiskDto);
+    const updated = await this.riskRepository.findOne({
+      where: { id },
+      relations: ['user', 'loan', 'riskFactors'],
+    });
+    if (!updated) {
+      throw new NotFoundException(`Risk assessment with ID ${id} not found`);
+    }
+    return updated;
   }
 
   async remove(id: string): Promise<void> {
@@ -57,7 +65,6 @@ export class RiskService {
   }
 
   async calculateRiskScore(userId: string, loanAmount: number): Promise<number> {
-    // Implement risk calculation logic
     return 75;
   }
 

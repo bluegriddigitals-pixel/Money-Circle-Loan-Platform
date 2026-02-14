@@ -1,29 +1,34 @@
-export enum PayoutRequestStatus {
-  PENDING = 'pending',
-  APPROVED = 'approved',
-  REJECTED = 'rejected',
-  PROCESSING = 'processing',
-  COMPLETED = 'completed',
-  FAILED = 'failed',
-  CANCELLED = 'cancelled',
-  ON_HOLD = 'on_hold',
-}
-
 export enum PayoutRequestType {
   LOAN_DISBURSEMENT = 'loan_disbursement',
+  INTEREST_PAYOUT = 'interest_payout',
+  FEE_PAYOUT = 'fee_payout',
+  INVESTOR_RETURN = 'investor_return',
   REFUND = 'refund',
-  COMMISSION = 'commission',
-  DIVIDEND = 'dividend',
-  WITHDRAWAL = 'withdrawal',
-  SETTLEMENT = 'settlement',
   OTHER = 'other',
 }
 
 export enum PayoutMethod {
   BANK_TRANSFER = 'bank_transfer',
+  WIRE_TRANSFER = 'wire_transfer',
   CHECK = 'check',
   DIGITAL_WALLET = 'digital_wallet',
-  CASH = 'cash',
   CRYPTO = 'crypto',
-  WIRE_TRANSFER = 'wire_transfer',
+  CASH = 'cash',
+}
+
+export enum PayoutRequestStatus {
+  PENDING = 'pending',
+  PROCESSING = 'processing',
+  APPROVED = 'approved',
+  COMPLETED = 'completed',
+  REJECTED = 'rejected',
+  CANCELLED = 'cancelled',
+  FAILED = 'failed',
+}
+
+export enum PayoutPriority {
+  LOW = 'low',
+  MEDIUM = 'medium',
+  HIGH = 'high',
+  URGENT = 'urgent',
 }
