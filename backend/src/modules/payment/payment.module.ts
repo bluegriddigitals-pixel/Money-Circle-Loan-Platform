@@ -11,6 +11,7 @@ import { TransactionService } from './services/transaction.service';
 import { EscrowService } from './services/escrow.service';
 import { DisbursementService } from './services/disbursement.service';
 import { PaymentMethodService } from './services/payment-method.service';
+import { PaymentProcessorService } from './payment-processor.service'; // Add this
 import { NotificationModule } from '../notification/notification.module';
 import { LoanModule } from '../loan/loan.module';
 import { UserModule } from '../user/user.module';
@@ -24,7 +25,7 @@ import { UserModule } from '../user/user.module';
       PayoutRequest,
       Disbursement,
     ]),
-    NotificationModule, // This should already be here, but verify it exists
+    NotificationModule,
     LoanModule,
     UserModule,
   ],
@@ -35,6 +36,7 @@ import { UserModule } from '../user/user.module';
     EscrowService,
     DisbursementService,
     PaymentMethodService,
+    PaymentProcessorService, // Add this
   ],
   exports: [
     PayoutService,
@@ -42,6 +44,7 @@ import { UserModule } from '../user/user.module';
     EscrowService,
     DisbursementService,
     PaymentMethodService,
+    PaymentProcessorService, // Add this if other modules need it
     TypeOrmModule,
   ],
 })

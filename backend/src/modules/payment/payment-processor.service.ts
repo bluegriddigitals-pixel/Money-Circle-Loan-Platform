@@ -1,118 +1,202 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
-export interface ProcessPaymentParams {
+@Injectable()
+export class PaymentProcessorService {
+  private readonly logger = new Logger(PaymentProcessorService.name);
+
+  constructor(private configService: ConfigService) {}
+
+  /**
+   * Process a payment through the payment gateway
+   */
+  async processPayment(data: {
     amount: number;
     currency: string;
     paymentMethodId: string;
     customerId?: string;
     description?: string;
     metadata?: any;
-}
+  }): Promise<{ transactionId: string; status: string; }> {
+    this.logger.log(`Processing payment: ${data.amount} ${data.currency}`);
 
-export interface RefundPaymentParams {
-    originalTransactionId: string;
-    amount: number;
-    reason?: string;
-}
+    // In development, simulate successful payment
+    if (this.configService.get('NODE_ENV') !== 'production') {
+      return {
+        transactionId: `txn_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        status: 'succeeded',
+      };
+    }
 
-export interface ProcessPayoutParams {
+    throw new BadRequestException('Payment processing not configured in production');
+  }
+
+  /**
+   * Process a payout to a user
+   */
+  async processPayout(data: {
     amount: number;
     currency: string;
     recipientDetails: any;
     description?: string;
-}
-
-@Injectable()
-export class PaymentProcessorService {
-  public readonly logger = new Logger(PaymentProcessorService.name);
-
-  // Update to accept parameters
-  async processPayment(data: ProcessPaymentParams): Promise<{ transactionId: string }> {
-    this.logger.log(`Processing payment: ${data.amount} ${data.currency}`);
-    // In production, this would call actual payment gateway
-    return { transactionId: `proc_${Date.now()}` };
-  }
-
-  // Update to accept parameters
-  async refundPayment(data: RefundPaymentParams): Promise<{ refundId: string }> {
-    this.logger.log(`Processing refund: ${data.amount} for transaction ${data.originalTransactionId}`);
-    // In production, this would call actual refund gateway
-    return { refundId: `ref_${Date.now()}` };
-  }
-
-  // Update to accept parameters
-  async processPayout(data: ProcessPayoutParams): Promise<{ transactionId: string }> {
+  }): Promise<{ transactionId: string; status: string; }> {
     this.logger.log(`Processing payout: ${data.amount} ${data.currency}`);
-    // In production, this would call actual payout service
-    return { transactionId: `payout_${Date.now()}` };
+
+    // In development, simulate successful payout
+    if (this.configService.get('NODE_ENV') !== 'production') {
+      return {
+        transactionId: `payout_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        status: 'completed',
+      };
+    }
+
+    throw new BadRequestException('Payout processing not configured in production');
   }
 
-  async healthCheck(): Promise<{ status: string }> {
-    return { status: 'healthy' };
+  /**
+   * Refund a payment
+   */
+  async refundPayment(data: {
+    originalTransactionId: string;
+    amount?: number;
+    reason?: string;
+  }): Promise<{ refundId: string; status: string; }> {
+    this.logger.log(`Processing refund for transaction: ${data.originalTransactionId}`);
+
+    // In development, simulate successful refund
+    if (this.configService.get('NODE_ENV') !== 'production') {
+      return {
+        refundId: `refund_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        status: 'succeeded',
+      };
+    }
+
+    throw new BadRequestException('Refund processing not configured in production');
   }
 
-  async parseWebhookEvent(rawPayload: string, signature: string): Promise<any> {
-    this.logger.log(`Parsing webhook event with signature: ${signature.substring(0, 10)}...`);
-    return JSON.parse(rawPayload);
+  /**
+   * Verify a payment method
+   */
+  async verifyPaymentMethod(data: {
+    paymentMethodId: string;
+    customerId?: string;
+  }): Promise<{ verified: boolean; details?: any }> {
+    this.logger.log(`Verifying payment method: ${data.paymentMethodId}`);
+
+    // In development, always return verified
+    if (this.configService.get('NODE_ENV') !== 'production') {
+      return {
+        verified: true,
+        details: {
+          brand: 'visa',
+          last4: '4242',
+          expMonth: 12,
+          expYear: 2026,
+        },
+      };
+    }
+
+    throw new BadRequestException('Payment method verification not configured in production');
   }
 
-  async handleWebhookEvent(event: any): Promise<void> {
-    this.logger.log(`Handling webhook event: ${event.type || 'unknown'}`);
+  /**
+   * Parse webhook event from payment gateway
+   */
+  async parseWebhookEvent(payload: any, signature?: string, secret?: string): Promise<any> {
+    this.logger.log('Parsing webhook event');
+
+    // In development, return mock webhook event
+    if (this.configService.get('NODE_ENV') !== 'production') {
+      return {
+        id: `evt_${Date.now()}`,
+        type: payload?.type || 'payment_intent.succeeded',
+        data: {
+          object: {
+            id: `pi_${Date.now()}`,
+            amount: payload?.amount || 1000,
+            currency: payload?.currency || 'usd',
+            status: 'succeeded',
+            metadata: payload?.metadata || {},
+          },
+        },
+        created: Math.floor(Date.now() / 1000),
+      };
+    }
+
+    // In production, use actual payment gateway webhook parsing
+    // Example with Stripe:
+    /*
+    const stripe = require('stripe')(this.configService.get('PAYMENT_GATEWAY_SECRET'));
+    const event = stripe.webhooks.constructEvent(payload, signature, secret);
+    return event;
+    */
+
+    throw new BadRequestException('Webhook parsing not configured in production');
   }
 
-  async tokenizePaymentMethod(data: {
-    cardNumber: string;
-    expiryMonth: number;
-    expiryYear: number;
-    cvv: string;
-    holderName: string;
-  }): Promise<any> {
-    this.logger.log(`Tokenizing payment method for: ${data.holderName}`);
+  /**
+   * Handle webhook event from payment gateway
+   */
+  async handleWebhookEvent(event: any): Promise<{ received: boolean; handled: boolean }> {
+    this.logger.log(`Handling webhook event: ${event.type}`);
+
+    // Log the event for debugging
+    this.logger.debug(`Webhook event type: ${event.type}, ID: ${event.id}`);
+
+    // In development, just acknowledge receipt
+    if (this.configService.get('NODE_ENV') !== 'production') {
+      return {
+        received: true,
+        handled: true,
+      };
+    }
+
+    // In production, process the webhook based on event type
+    switch (event.type) {
+      case 'payment_intent.succeeded':
+        this.logger.log(`Payment succeeded: ${event.data.object.id}`);
+        // Update transaction status in database
+        break;
+      case 'payment_intent.payment_failed':
+        this.logger.log(`Payment failed: ${event.data.object.id}`);
+        // Handle failed payment
+        break;
+      case 'payout.paid':
+        this.logger.log(`Payout completed: ${event.data.object.id}`);
+        // Update payout status
+        break;
+      case 'payout.failed':
+        this.logger.log(`Payout failed: ${event.data.object.id}`);
+        // Handle failed payout
+        break;
+      default:
+        this.logger.log(`Unhandled event type: ${event.type}`);
+    }
+
     return {
-      token: `tok_${Date.now()}`,
-      last4: data.cardNumber.slice(-4),
-      brand: this.detectCardBrand(data.cardNumber),
+      received: true,
+      handled: true,
     };
   }
 
-  async createCustomer(email: string): Promise<string> {
-    this.logger.log(`Creating customer: ${email}`);
-    return `cus_${Date.now()}`;
-  }
+  /**
+   * Health check for payment processor
+   */
+  async healthCheck(): Promise<{ status: string; timestamp: string }> {
+    this.logger.log('Payment processor health check');
 
-  async simulatePayment(amount: number, success: boolean = true): Promise<any> {
-    this.logger.log(`Simulating payment: $${amount}, success: ${success}`);
-    if (success) {
-      return {
-        success: true,
-        transactionId: `sim_${Date.now()}`,
-        amount,
-        status: 'succeeded',
+    // In development, always return healthy
+    if (this.configService.get('NODE_ENV') !== 'production') {
+      return { 
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
       };
-    } else {
-      throw new Error('Payment simulation failed');
     }
-  }
 
-  async simulatePayout(amount: number, success: boolean = true): Promise<any> {
-    this.logger.log(`Simulating payout: $${amount}, success: ${success}`);
-    if (success) {
-      return {
-        success: true,
-        payoutId: `payout_sim_${Date.now()}`,
-        amount,
-        status: 'succeeded',
-      };
-    } else {
-      throw new Error('Payout simulation failed');
-    }
-  }
-
-  private detectCardBrand(cardNumber: string): string {
-    if (cardNumber.startsWith('4')) return 'visa';
-    if (cardNumber.startsWith('5')) return 'mastercard';
-    if (cardNumber.startsWith('3')) return 'amex';
-    if (cardNumber.startsWith('6')) return 'discover';
-    return 'unknown';
+    // In production, check actual payment gateway status
+    return { 
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+    };
   }
 }

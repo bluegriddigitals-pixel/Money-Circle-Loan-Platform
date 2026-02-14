@@ -1,48 +1,50 @@
-import { Logger } from '@nestjs/common';
-export interface ProcessPaymentParams {
-    amount: number;
-    currency: string;
-    paymentMethodId: string;
-    customerId?: string;
-    description?: string;
-    metadata?: any;
-}
-export interface RefundPaymentParams {
-    originalTransactionId: string;
-    amount: number;
-    reason?: string;
-}
-export interface ProcessPayoutParams {
-    amount: number;
-    currency: string;
-    recipientDetails: any;
-    description?: string;
-}
+import { ConfigService } from '@nestjs/config';
 export declare class PaymentProcessorService {
-    readonly logger: Logger;
-    processPayment(data: ProcessPaymentParams): Promise<{
+    private configService;
+    private readonly logger;
+    constructor(configService: ConfigService);
+    processPayment(data: {
+        amount: number;
+        currency: string;
+        paymentMethodId: string;
+        customerId?: string;
+        description?: string;
+        metadata?: any;
+    }): Promise<{
         transactionId: string;
+        status: string;
     }>;
-    refundPayment(data: RefundPaymentParams): Promise<{
+    processPayout(data: {
+        amount: number;
+        currency: string;
+        recipientDetails: any;
+        description?: string;
+    }): Promise<{
+        transactionId: string;
+        status: string;
+    }>;
+    refundPayment(data: {
+        originalTransactionId: string;
+        amount?: number;
+        reason?: string;
+    }): Promise<{
         refundId: string;
+        status: string;
     }>;
-    processPayout(data: ProcessPayoutParams): Promise<{
-        transactionId: string;
+    verifyPaymentMethod(data: {
+        paymentMethodId: string;
+        customerId?: string;
+    }): Promise<{
+        verified: boolean;
+        details?: any;
+    }>;
+    parseWebhookEvent(payload: any, signature?: string, secret?: string): Promise<any>;
+    handleWebhookEvent(event: any): Promise<{
+        received: boolean;
+        handled: boolean;
     }>;
     healthCheck(): Promise<{
         status: string;
+        timestamp: string;
     }>;
-    parseWebhookEvent(rawPayload: string, signature: string): Promise<any>;
-    handleWebhookEvent(event: any): Promise<void>;
-    tokenizePaymentMethod(data: {
-        cardNumber: string;
-        expiryMonth: number;
-        expiryYear: number;
-        cvv: string;
-        holderName: string;
-    }): Promise<any>;
-    createCustomer(email: string): Promise<string>;
-    simulatePayment(amount: number, success?: boolean): Promise<any>;
-    simulatePayout(amount: number, success?: boolean): Promise<any>;
-    private detectCardBrand;
 }

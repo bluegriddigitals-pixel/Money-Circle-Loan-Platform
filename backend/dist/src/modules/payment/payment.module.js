@@ -20,6 +20,7 @@ const transaction_service_1 = require("./services/transaction.service");
 const escrow_service_1 = require("./services/escrow.service");
 const disbursement_service_1 = require("./services/disbursement.service");
 const payment_method_service_1 = require("./services/payment-method.service");
+const payment_processor_service_1 = require("./payment-processor.service");
 const notification_module_1 = require("../notification/notification.module");
 const loan_module_1 = require("../loan/loan.module");
 const user_module_1 = require("../user/user.module");
@@ -47,6 +48,7 @@ exports.PaymentModule = PaymentModule = __decorate([
             escrow_service_1.EscrowService,
             disbursement_service_1.DisbursementService,
             payment_method_service_1.PaymentMethodService,
+            payment_processor_service_1.PaymentProcessorService,
         ],
         exports: [
             payment_service_1.PayoutService,
@@ -54,6 +56,7 @@ exports.PaymentModule = PaymentModule = __decorate([
             escrow_service_1.EscrowService,
             disbursement_service_1.DisbursementService,
             payment_method_service_1.PaymentMethodService,
+            payment_processor_service_1.PaymentProcessorService,
             typeorm_1.TypeOrmModule,
         ],
     })
