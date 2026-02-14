@@ -10,16 +10,15 @@ exports.LoanModule = void 0;
 const common_1 = require("@nestjs/common");
 const typeorm_1 = require("@nestjs/typeorm");
 const loan_entity_1 = require("./entities/loan.entity");
+const loan_service_1 = require("./loan.service");
 let LoanModule = class LoanModule {
 };
 exports.LoanModule = LoanModule;
 exports.LoanModule = LoanModule = __decorate([
     (0, common_1.Module)({
-        imports: [
-            typeorm_1.TypeOrmModule.forFeature([loan_entity_1.Loan]),
-        ],
-        controllers: [],
-        providers: [],
+        imports: [typeorm_1.TypeOrmModule.forFeature([loan_entity_1.Loan])],
+        providers: [loan_service_1.LoanService],
+        exports: [loan_service_1.LoanService, typeorm_1.TypeOrmModule],
     })
 ], LoanModule);
 //# sourceMappingURL=loan.module.js.map

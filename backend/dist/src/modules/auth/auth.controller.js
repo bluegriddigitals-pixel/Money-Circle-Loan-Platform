@@ -29,7 +29,7 @@ let AuthController = class AuthController {
     async login(loginDto) {
         return this.authService.login(loginDto);
     }
-    async refresh(_refreshToken) {
+    async refresh() {
         return {
             message: "Refresh endpoint - Implementation pending",
             accessToken: "dummy-token-placeholder"
@@ -78,9 +78,8 @@ __decorate([
             },
         },
     }),
-    __param(0, (0, common_1.Body)("refreshToken")),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "refresh", null);
 __decorate([

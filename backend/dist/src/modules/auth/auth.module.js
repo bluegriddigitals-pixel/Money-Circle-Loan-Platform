@@ -15,30 +15,38 @@ const config_1 = require("@nestjs/config");
 const auth_service_1 = require("./auth.service");
 const auth_controller_1 = require("./auth.controller");
 const jwt_strategy_1 = require("./strategies/jwt.strategy");
+const jwt_auth_guard_1 = require("./guards/jwt-auth.guard");
+const roles_guard_1 = require("./guards/roles.guard");
 const user_entity_1 = require("../user/entities/user.entity");
-const user_profile_entity_1 = require("../user/entities/user-profile.entity");
+const notification_module_1 = require("../notification/notification.module");
 let AuthModule = class AuthModule {
 };
 exports.AuthModule = AuthModule;
 exports.AuthModule = AuthModule = __decorate([
     (0, common_1.Module)({
         imports: [
-            passport_1.PassportModule,
-            typeorm_1.TypeOrmModule.forFeature([user_entity_1.User, user_profile_entity_1.UserProfile]),
+            passport_1.PassportModule.register({ defaultStrategy: 'jwt' }),
             jwt_1.JwtModule.registerAsync({
                 imports: [config_1.ConfigModule],
-                useFactory: (configService) => ({
-                    secret: configService.get("jwt.secret"),
+                inject: [config_1.ConfigService],
+                useFactory: async (configService) => ({
+                    secret: configService.get('JWT_SECRET') || 'your-super-secret-jwt-key-change-in-production',
                     signOptions: {
-                        expiresIn: configService.get("jwt.accessTokenExpiry"),
+                        expiresIn: configService.get('JWT_ACCESS_EXPIRY') || '15m',
                     },
                 }),
-                inject: [config_1.ConfigService],
             }),
+            typeorm_1.TypeOrmModule.forFeature([user_entity_1.User]),
+            notification_module_1.NotificationModule,
         ],
         controllers: [auth_controller_1.AuthController],
-        providers: [auth_service_1.AuthService, jwt_strategy_1.JwtStrategy],
-        exports: [auth_service_1.AuthService],
+        providers: [
+            auth_service_1.AuthService,
+            jwt_strategy_1.JwtStrategy,
+            jwt_auth_guard_1.JwtAuthGuard,
+            roles_guard_1.RolesGuard,
+        ],
+        exports: [jwt_strategy_1.JwtStrategy, jwt_auth_guard_1.JwtAuthGuard, roles_guard_1.RolesGuard, passport_1.PassportModule],
     })
 ], AuthModule);
 //# sourceMappingURL=auth.module.js.map

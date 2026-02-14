@@ -1,0 +1,43 @@
+import { UserRole } from '../../modules/user/entities/user.entity';
+export declare const ROLES: {
+    ALL: readonly [UserRole.BORROWER, UserRole.LENDER, UserRole.ADMIN, UserRole.AUDITOR, UserRole.TRANSACTION_ADMIN, UserRole.SYSTEM_ADMIN, UserRole.COMPLIANCE_OFFICER, UserRole.RISK_ANALYST, UserRole.CUSTOMER_SUPPORT, UserRole.FINANCIAL_ADVISOR, UserRole.LEGAL_ADVISOR, UserRole.PARTNER, UserRole.AFFILIATE];
+    BORROWER_ROLES: readonly [UserRole.BORROWER];
+    LENDER_ROLES: readonly [UserRole.LENDER];
+    ADMIN_ROLES: readonly [UserRole.ADMIN, UserRole.SYSTEM_ADMIN, UserRole.TRANSACTION_ADMIN];
+    COMPLIANCE_ROLES: readonly [UserRole.COMPLIANCE_OFFICER, UserRole.RISK_ANALYST, UserRole.AUDITOR];
+    SUPPORT_ROLES: readonly [UserRole.CUSTOMER_SUPPORT, UserRole.FINANCIAL_ADVISOR, UserRole.LEGAL_ADVISOR];
+    PARTNER_ROLES: readonly [UserRole.PARTNER, UserRole.AFFILIATE];
+    ALL_ADMIN_ROLES: readonly [UserRole.ADMIN, UserRole.SYSTEM_ADMIN, UserRole.TRANSACTION_ADMIN, UserRole.COMPLIANCE_OFFICER, UserRole.RISK_ANALYST, UserRole.AUDITOR];
+};
+export declare const ROLE_HIERARCHY: {
+    readonly system_admin: 100;
+    readonly admin: 90;
+    readonly transaction_admin: 80;
+    readonly compliance_officer: 70;
+    readonly auditor: 60;
+    readonly risk_analyst: 50;
+    readonly financial_advisor: 40;
+    readonly legal_advisor: 40;
+    readonly customer_support: 30;
+    readonly partner: 20;
+    readonly affiliate: 10;
+    readonly lender: 5;
+    readonly borrower: 1;
+};
+export declare const ROLE_PERMISSIONS: {
+    readonly system_admin: readonly ["manage_all", "manage_users", "manage_roles", "manage_system", "view_audit_logs", "manage_compliance", "manage_finances", "manage_settings"];
+    readonly admin: readonly ["manage_users", "view_audit_logs", "manage_compliance", "manage_finances", "view_reports"];
+    readonly transaction_admin: readonly ["manage_transactions", "view_transactions", "approve_payouts", "manage_fees", "view_financial_reports"];
+    readonly compliance_officer: readonly ["manage_kyc", "view_kyc", "manage_aml_alerts", "run_compliance_checks", "view_compliance_reports"];
+    readonly auditor: readonly ["view_audit_logs", "view_transactions", "view_compliance", "view_financial_reports", "export_audit_data"];
+    readonly risk_analyst: readonly ["view_risk_scores", "manage_risk_rules", "view_risk_reports", "flag_suspicious_activity"];
+    readonly financial_advisor: readonly ["view_investments", "view_loans", "provide_advice", "view_financial_metrics"];
+    readonly legal_advisor: readonly ["view_legal_docs", "manage_legal_compliance", "view_disputes"];
+    readonly customer_support: readonly ["view_users", "manage_tickets", "view_loans", "view_investments", "assist_users"];
+    readonly partner: readonly ["view_partner_dashboard", "manage_partner_products", "view_partner_reports"];
+    readonly affiliate: readonly ["view_affiliate_dashboard", "manage_referrals", "view_earnings"];
+    readonly lender: readonly ["view_investments", "make_investments", "withdraw_funds", "view_earnings", "view_marketplace"];
+    readonly borrower: readonly ["apply_loans", "view_loans", "make_payments", "view_credit_score", "manage_profile"];
+};
+export type RoleType = keyof typeof ROLE_HIERARCHY;
+export type PermissionType = typeof ROLE_PERMISSIONS[RoleType][number];

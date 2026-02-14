@@ -1,21 +1,44 @@
-﻿import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, OneToOne, JoinColumn } from 'typeorm';
+import { User } from '../../user/entities/user.entity';
 
 @Entity('notification_preferences')
 export class NotificationPreference {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @OneToOne(() => User)
+  @JoinColumn({ name: 'userId' })
+  user: User;
+
+  @Column({ unique: true })
   userId: string;
 
   @Column({ default: true })
-  email: boolean;
-
-  @Column({ default: true })
-  sms: boolean;
+  emailEnabled: boolean;
 
   @Column({ default: false })
-  push: boolean;
+  smsEnabled: boolean;
+
+  @Column({ default: false })
+  pushEnabled: boolean;
+
+  @Column({ default: true })
+  loanUpdates: boolean;
+
+  @Column({ default: true })
+  paymentReminders: boolean;
+
+  @Column({ default: true })
+  marketingEmails: boolean;
+
+  @Column({ default: true })
+  securityAlerts: boolean;
+
+  @Column({ default: false })
+  promotionalSms: boolean;
+
+  @Column('jsonb', { nullable: true })
+  metadata: Record<string, any>;
 
   @CreateDateColumn()
   createdAt: Date;

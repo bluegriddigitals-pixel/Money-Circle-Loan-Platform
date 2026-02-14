@@ -14,10 +14,10 @@ const typeorm_1 = require("typeorm");
 const user_entity_1 = require("./user.entity");
 var RiskLevel;
 (function (RiskLevel) {
-    RiskLevel["LOW"] = "low";
-    RiskLevel["MEDIUM"] = "medium";
-    RiskLevel["HIGH"] = "high";
-    RiskLevel["VERY_HIGH"] = "very_high";
+    RiskLevel["LOW"] = "LOW";
+    RiskLevel["MEDIUM"] = "MEDIUM";
+    RiskLevel["HIGH"] = "HIGH";
+    RiskLevel["CRITICAL"] = "CRITICAL";
 })(RiskLevel || (exports.RiskLevel = RiskLevel = {}));
 let UserProfile = class UserProfile {
 };
@@ -88,6 +88,18 @@ __decorate([
     __metadata("design:type", String)
 ], UserProfile.prototype, "riskLevel", void 0);
 __decorate([
+    (0, typeorm_1.Column)({ type: 'jsonb', nullable: true }),
+    __metadata("design:type", Object)
+], UserProfile.prototype, "privacySettings", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: 'jsonb', nullable: true }),
+    __metadata("design:type", Object)
+], UserProfile.prototype, "securitySettings", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ type: 'jsonb', default: { email: true, sms: false, push: true } }),
+    __metadata("design:type", Object)
+], UserProfile.prototype, "notificationPreferences", void 0);
+__decorate([
     (0, typeorm_1.Column)({ default: 50 }),
     __metadata("design:type", Number)
 ], UserProfile.prototype, "riskScore", void 0);
@@ -95,10 +107,6 @@ __decorate([
     (0, typeorm_1.Column)({ type: "timestamp", nullable: true }),
     __metadata("design:type", Date)
 ], UserProfile.prototype, "lastRiskAssessment", void 0);
-__decorate([
-    (0, typeorm_1.Column)({ type: "jsonb", default: { email: true, sms: false, push: true } }),
-    __metadata("design:type", Object)
-], UserProfile.prototype, "notificationPreferences", void 0);
 __decorate([
     (0, typeorm_1.Column)({ type: "jsonb", nullable: true }),
     __metadata("design:type", Object)

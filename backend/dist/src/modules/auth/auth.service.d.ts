@@ -1,26 +1,52 @@
-import { JwtService } from "@nestjs/jwt";
-import { Repository } from "typeorm";
-import { ConfigService } from "@nestjs/config";
-import { User } from "../user/entities/user.entity";
-import { UserProfile } from "../user/entities/user-profile.entity";
-import { RegisterDto } from "./dto/register.dto";
-import { LoginDto } from "./dto/login.dto";
+import { JwtService } from '@nestjs/jwt';
+import { Repository } from 'typeorm';
+import { User } from '../user/entities/user.entity';
+import { LoginDto } from './dto/login.dto';
+import { RegisterDto } from './dto/register.dto';
+import { NotificationService } from '../notification/notification.service';
 export declare class AuthService {
-    private usersRepository;
-    private profilesRepository;
+    private userRepository;
     private jwtService;
-    private configService;
-    constructor(usersRepository: Repository<User>, profilesRepository: Repository<UserProfile>, jwtService: JwtService, configService: ConfigService);
+    private notificationService;
+    private readonly logger;
+    constructor(userRepository: Repository<User>, jwtService: JwtService, notificationService: NotificationService);
     register(registerDto: RegisterDto): Promise<{
-        user: User;
-        tokens: any;
+        user: Partial<User>;
+        token: string;
     }>;
     login(loginDto: LoginDto): Promise<{
-        user: User;
-        tokens: any;
+        user: Partial<User>;
+        token: string;
     }>;
-    generateTokens(user: User): Promise<{
-        accessToken: string;
+    verifyEmail(userId: string): Promise<{
+        message: string;
     }>;
-    validateUser(userId: string): Promise<User>;
+    sendVerificationEmail(userId: string): Promise<{
+        message: string;
+    }>;
+    verifyPhone(userId: string): Promise<{
+        message: string;
+    }>;
+    requestPasswordReset(email: string): Promise<{
+        message: string;
+    }>;
+    resetPassword(token: string, newPassword: string): Promise<{
+        message: string;
+    }>;
+    changePassword(userId: string, oldPassword: string, newPassword: string): Promise<{
+        message: string;
+    }>;
+    enableTwoFactor(userId: string, ipAddress: string): Promise<{
+        message: string;
+    }>;
+    disableTwoFactor(userId: string, ipAddress: string): Promise<{
+        message: string;
+    }>;
+    sendSecurityAlertEmail(userId: string, alertType: string, details: any): Promise<{
+        message: string;
+    }>;
+    sendSuspiciousActivityAlert(userId: string, activity: any): Promise<{
+        message: string;
+    }>;
+    private generateToken;
 }

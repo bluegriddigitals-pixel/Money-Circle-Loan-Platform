@@ -11,6 +11,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
+var UserService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UserService = void 0;
 const common_1 = require("@nestjs/common");
@@ -18,10 +19,13 @@ const typeorm_1 = require("@nestjs/typeorm");
 const typeorm_2 = require("typeorm");
 const user_entity_1 = require("./entities/user.entity");
 const user_profile_entity_1 = require("./entities/user-profile.entity");
-let UserService = class UserService {
+const kyc_entity_1 = require("../compliance/entities/kyc.entity");
+const user_entity_2 = require("./entities/user.entity");
+let UserService = UserService_1 = class UserService {
     constructor(usersRepository, profilesRepository) {
         this.usersRepository = usersRepository;
         this.profilesRepository = profilesRepository;
+        this.logger = new common_1.Logger(UserService_1.name);
     }
     async findById(id) {
         const user = await this.usersRepository.findOne({
@@ -51,6 +55,58 @@ let UserService = class UserService {
         await this.usersRepository.update(id, userData);
         return this.findById(id);
     }
+    async updateKycStatus(userId, kycStatus) {
+        const user = await this.findById(userId);
+        user.kycStatus = kycStatus;
+        return this.usersRepository.save(user);
+    }
+    async initializeUserAccount(userId) {
+        try {
+            const user = await this.usersRepository.findOne({
+                where: { id: userId }
+            });
+            if (user) {
+                user.accountStatus = user_entity_2.AccountStatus.ACTIVE;
+                user.verificationStatus = user_entity_2.VerificationStatus.EMAIL_VERIFIED;
+                user.kycStatus = kyc_entity_1.KycStatus.NOT_STARTED;
+                await this.usersRepository.save(user);
+                this.logger.log(`User account initialized: ${userId}`);
+                if (!user.profile) {
+                    const profile = this.profilesRepository.create({
+                        user: user,
+                        notificationPreferences: {
+                            email: true,
+                            sms: false,
+                            push: false,
+                            marketing: false,
+                        },
+                        privacySettings: {
+                            profileVisibility: 'PRIVATE',
+                            activityVisibility: 'FRIENDS_ONLY',
+                            searchVisibility: true,
+                        },
+                        securitySettings: {
+                            twoFactorEnabled: false,
+                            biometricEnabled: false,
+                            sessionTimeout: 30,
+                            loginAlerts: true,
+                            unusualActivityAlerts: true,
+                        },
+                    });
+                    await this.profilesRepository.save(profile);
+                    this.logger.log(`Default profile created for user: ${userId}`);
+                }
+            }
+            else {
+                this.logger.warn(`User not found for account initialization: ${userId}`);
+                throw new common_1.NotFoundException('User not found');
+            }
+        }
+        catch (error) {
+            this.logger.error(`Failed to initialize user account ${userId}: ${error.message}`);
+            throw new common_1.InternalServerErrorException('Failed to initialize user account');
+        }
+    }
     async getDashboard(userId) {
         const user = await this.findById(userId);
         const dashboardData = {
@@ -59,7 +115,7 @@ let UserService = class UserService {
                 email: user.email,
                 fullName: user.fullName,
                 role: user.role,
-                status: user.status,
+                accountStatus: user.accountStatus,
                 kycStatus: user.kycStatus,
             },
             profile: user.profile,
@@ -68,7 +124,7 @@ let UserService = class UserService {
     }
 };
 exports.UserService = UserService;
-exports.UserService = UserService = __decorate([
+exports.UserService = UserService = UserService_1 = __decorate([
     (0, common_1.Injectable)(),
     __param(0, (0, typeorm_1.InjectRepository)(user_entity_1.User)),
     __param(1, (0, typeorm_1.InjectRepository)(user_profile_entity_1.UserProfile)),

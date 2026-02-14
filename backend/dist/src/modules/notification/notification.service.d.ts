@@ -1,0 +1,32 @@
+import { Repository } from 'typeorm';
+import { Notification } from './entities/notification.entity';
+import { NotificationPreference } from './entities/notification-preference.entity';
+import { User } from '../user/entities/user.entity';
+export declare class NotificationService {
+    private notificationRepository;
+    private notificationPreferenceRepository;
+    private readonly logger;
+    constructor(notificationRepository: Repository<Notification>, notificationPreferenceRepository: Repository<NotificationPreference>);
+    sendVerificationEmail(user: User): Promise<void>;
+    sendEmailVerifiedNotification(user: User): Promise<void>;
+    sendPhoneVerifiedNotification(user: User): Promise<void>;
+    sendSecurityAlert(user: User, alertType: string, details: any): Promise<void>;
+    sendSuspiciousActivityAlert(user: User, activity: any): Promise<void>;
+    sendPasswordChangeNotification(user: User): Promise<void>;
+    sendPasswordResetConfirmation(user: User): Promise<void>;
+    sendTwoFactorEnabledNotification(user: User): Promise<void>;
+    sendTwoFactorDisabledNotification(user: User): Promise<void>;
+    sendNewUserNotification(user: User): Promise<void>;
+    sendTransactionNotification(transaction: any): Promise<void>;
+    sendPayoutRequestNotification(payoutRequest: any): Promise<void>;
+    sendPayoutApprovalNotification(payoutRequest: any): Promise<void>;
+    sendPayoutCompletionNotification(payoutRequest: any): Promise<void>;
+    sendPayoutRejectionNotification(payoutRequest: any): Promise<void>;
+    sendDisbursementNotification(disbursement: any): Promise<void>;
+    sendDisbursementApprovalNotification(disbursement: any): Promise<void>;
+    private createNotification;
+    getUserNotifications(userId: string, limit?: number): Promise<Notification[]>;
+    markAsRead(notificationId: string): Promise<void>;
+    markAllAsRead(userId: string): Promise<void>;
+    getUnreadCount(userId: string): Promise<number>;
+}

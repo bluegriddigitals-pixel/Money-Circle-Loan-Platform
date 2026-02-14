@@ -5,14 +5,14 @@ export declare class AuthController {
     private readonly authService;
     constructor(authService: AuthService);
     register(registerDto: RegisterDto): Promise<{
-        user: import("../user/entities/user.entity").User;
-        tokens: any;
+        user: Partial<import("../user/entities/user.entity").User>;
+        token: string;
     }>;
     login(loginDto: LoginDto): Promise<{
-        user: import("../user/entities/user.entity").User;
-        tokens: any;
+        user: Partial<import("../user/entities/user.entity").User>;
+        token: string;
     }>;
-    refresh(_refreshToken: string): Promise<{
+    refresh(): Promise<{
         message: string;
         accessToken: string;
     }>;

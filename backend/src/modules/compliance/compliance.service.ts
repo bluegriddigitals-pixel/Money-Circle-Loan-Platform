@@ -1,1400 +1,1056 @@
-import {
-    Injectable,
-    Logger,
-    NotFoundException,
-    BadRequestException,
-    ConflictException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, FindOptionsWhere, In } from 'typeorm';
-import { v4 as uuidv4 } from 'uuid';
-import {
-    Kyc,
-    KycStatus,
-    KycLevel,
-    KycType
-} from './entities/kyc.entity';
-import {
-    KycDocument,
-    KycDocumentType,
-    KycDocumentStatus
-} from './entities/kyc-document.entity';
-import {
-    ComplianceCheck,
-    ComplianceCheckType,
-    ComplianceCheckStatus,
-    ComplianceCheckResult
-} from './entities/compliance-check.entity';
-import {
-    SanctionScreening,
-    SanctionScreeningStatus,
-    SanctionMatchStatus,
-    SanctionList
-} from './entities/sanction-screening.entity';
-import {
-    AmlAlert,
-    AmlAlertType,
-    AmlAlertSeverity,
-    AmlAlertStatus
-} from './entities/aml-alert.entity';
-import { UserService } from '../user/user.service';
+import { Repository, Between } from 'typeorm';
+import { Kyc, KycStatus } from './entities/kyc.entity';
+import { KycDocument, KycDocumentStatus, KycDocumentType } from './entities/kyc-document.entity';
+import { ComplianceCheck, ComplianceCheckType, ComplianceCheckStatus, ComplianceCheckResult } from './entities/compliance-check.entity';
+import { SanctionScreening, SanctionScreeningStatus, SanctionMatchStatus, RiskLevel } from './entities/sanction-screening.entity';
+import { AmlAlert, AmlAlertStatus, AmlAlertSeverity, AmlAlertType } from './entities/aml-alert.entity';
 import { NotificationService } from '../notification/notification.service';
+import { User } from '../user/entities/user.entity';
 
 @Injectable()
 export class ComplianceService {
-    private readonly logger = new Logger(ComplianceService.name);
+  private readonly logger = new Logger(ComplianceService.name);
 
-    constructor(
-        @InjectRepository(Kyc)
-        private readonly kycRepository: Repository<Kyc>,
-        @InjectRepository(KycDocument)
-        private readonly kycDocumentRepository: Repository<KycDocument>,
-        @InjectRepository(ComplianceCheck)
-        private readonly complianceCheckRepository: Repository<ComplianceCheck>,
-        @InjectRepository(SanctionScreening)
-        private readonly sanctionScreeningRepository: Repository<SanctionScreening>,
-        @InjectRepository(AmlAlert)
-        private readonly amlAlertRepository: Repository<AmlAlert>,
-        private readonly userService: UserService,
-        private readonly notificationService: NotificationService,
-    ) { }
+  constructor(
+    @InjectRepository(Kyc)
+    private kycRepository: Repository<Kyc>,
+    @InjectRepository(KycDocument)
+    private kycDocumentRepository: Repository<KycDocument>,
+    @InjectRepository(ComplianceCheck)
+    private complianceCheckRepository: Repository<ComplianceCheck>,
+    @InjectRepository(SanctionScreening)
+    private sanctionScreeningRepository: Repository<SanctionScreening>,
+    @InjectRepository(AmlAlert)
+    private amlAlertRepository: Repository<AmlAlert>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
+    private notificationService: NotificationService,
+  ) {}
 
-    // ============ KYC METHODS ============
+  // ============ KYC METHODS ============
 
-    /**
-     * Get KYC by ID
-     */
-    async getKycById(id: string): Promise<Kyc> {
-        const kyc = await this.kycRepository.findOne({
-            where: { id },
-            relations: ['user', 'documents'],
-        });
+  async getKycById(id: string): Promise<Kyc> {
+    const kyc = await this.kycRepository.findOne({
+      where: { id },
+      relations: ['user', 'documents']
+    });
 
-        if (!kyc) {
-            throw new NotFoundException(`KYC with ID ${id} not found`);
-        }
-
-        return kyc;
+    if (!kyc) {
+      throw new NotFoundException(`KYC with ID ${id} not found`);
     }
 
-    /**
-     * Get KYC by user ID
-     */
-    async getKycByUserId(userId: string): Promise<Kyc> {
-        const kyc = await this.kycRepository.findOne({
-            where: { userId },
-            relations: ['documents'],
-        });
+    return kyc;
+  }
 
-        if (!kyc) {
-            throw new NotFoundException(`KYC for user ${userId} not found`);
-        }
+  async getKycByUserId(userId: string): Promise<Kyc> {
+    const kyc = await this.kycRepository.findOne({
+      where: { userId },
+      relations: ['documents']
+    });
 
-        return kyc;
+    if (!kyc) {
+      throw new NotFoundException(`KYC for user ${userId} not found`);
     }
 
-    /**
-     * Initiate KYC process for a user
-     */
-    async initiateKyc(userId: string): Promise<Kyc> {
-        // Check if KYC already exists
-        const existingKyc = await this.kycRepository.findOne({
-            where: { userId },
-        });
+    return kyc;
+  }
 
-        if (existingKyc) {
-            throw new ConflictException(`KYC already exists for user ${userId}`);
-        }
+  async initiateKyc(userId: string): Promise<Kyc> {
+    const existingKyc = await this.kycRepository.findOne({
+      where: { userId }
+    });
 
-        const user = await this.userService.findById(userId);
-
-        const kyc = this.kycRepository.create({
-            id: uuidv4(),
-            userId,
-            status: KycStatus.IN_PROGRESS,
-            level: KycLevel.LEVEL_1,
-            type: KycType.INDIVIDUAL,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-        });
-
-        const savedKyc = await this.kycRepository.save(kyc);
-
-        this.logger.log(`KYC initiated for user ${userId}`);
-
-        return savedKyc;
+    if (existingKyc) {
+      return existingKyc;
     }
 
-    /**
-     * Submit KYC for review
-     */
-    async submitKyc(kycId: string): Promise<Kyc> {
-        const kyc = await this.getKycById(kycId);
-
-        if (kyc.status !== KycStatus.IN_PROGRESS) {
-            throw new BadRequestException(`KYC cannot be submitted from status: ${kyc.status}`);
-        }
-
-        // Check if all required documents are uploaded
-        const documents = await this.kycDocumentRepository.find({
-            where: { kycId },
-        });
-
-        const requiredDocs = [
-            KycDocumentType.PASSPORT,
-            KycDocumentType.DRIVERS_LICENSE,
-            KycDocumentType.NATIONAL_ID,
-        ];
-
-        const hasRequiredDoc = documents.some(doc =>
-            requiredDocs.includes(doc.type) &&
-            doc.status === KycDocumentStatus.UPLOADED
-        );
-
-        if (!hasRequiredDoc) {
-            throw new BadRequestException('At least one valid ID document is required');
-        }
-
-        kyc.status = KycStatus.SUBMITTED;
-        kyc.submittedAt = new Date();
-        kyc.updatedAt = new Date();
-
-        const savedKyc = await this.kycRepository.save(kyc);
-
-        this.logger.log(`KYC ${kycId} submitted for review`);
-
-        return savedKyc;
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
     }
 
-    /**
-     * Approve KYC
-     */
-    async approveKyc(kycId: string, approvedBy: string, notes?: string): Promise<Kyc> {
-        const kyc = await this.getKycById(kycId);
+    const kyc = this.kycRepository.create({
+      userId,
+      status: KycStatus.INITIATED,
+    });
 
-        if (kyc.status !== KycStatus.SUBMITTED && kyc.status !== KycStatus.UNDER_REVIEW) {
-            throw new BadRequestException(`KYC cannot be approved from status: ${kyc.status}`);
-        }
+    return this.kycRepository.save(kyc);
+  }
 
-        kyc.status = KycStatus.VERIFIED;
-        kyc.approvedAt = new Date();
-        kyc.approvedBy = approvedBy;
-        kyc.reviewedAt = new Date();
-        kyc.reviewedBy = approvedBy;
-        kyc.notes = notes || kyc.notes;
-        kyc.updatedAt = new Date();
+  async submitKyc(kycId: string): Promise<Kyc> {
+    const kyc = await this.getKycById(kycId);
+    
+    kyc.status = KycStatus.SUBMITTED;
+    kyc.submittedAt = new Date();
 
-        const savedKyc = await this.kycRepository.save(kyc);
+    const updatedKyc = await this.kycRepository.save(kyc);
 
-        // Update user KYC status
-        await this.userService.updateKycStatus(kyc.userId, KycStatus.VERIFIED);
-
-        // Send notification
-        await this.notificationService.sendEmailVerifiedNotification(
-            kyc.user?.email,
-        );
-
-        this.logger.log(`KYC ${kycId} approved by ${approvedBy}`);
-
-        return savedKyc;
+    const user = await this.userRepository.findOne({ where: { id: kyc.userId } });
+    if (user) {
+      await this.notificationService.sendSecurityAlert(
+        user,
+        'KYC_SUBMITTED',
+        { kycId }
+      );
     }
 
-    /**
-     * Reject KYC
-     */
-    async rejectKyc(kycId: string, rejectedBy: string, reason: string): Promise<Kyc> {
-        const kyc = await this.getKycById(kycId);
+    return updatedKyc;
+  }
 
-        if (kyc.status === KycStatus.VERIFIED || kyc.status === KycStatus.REJECTED) {
-            throw new BadRequestException(`KYC cannot be rejected from status: ${kyc.status}`);
-        }
+  async approveKyc(kycId: string, reviewerId: string, notes?: string): Promise<Kyc> {
+    const kyc = await this.getKycById(kycId);
 
-        kyc.status = KycStatus.REJECTED;
-        kyc.rejectedAt = new Date();
-        kyc.rejectedBy = rejectedBy;
-        kyc.rejectionReason = reason;
-        kyc.reviewedAt = new Date();
-        kyc.reviewedBy = rejectedBy;
-        kyc.updatedAt = new Date();
+    kyc.status = KycStatus.APPROVED;
+    kyc.reviewedBy = reviewerId;
+    kyc.reviewedAt = new Date();
+    kyc.reviewNotes = notes;
 
-        const savedKyc = await this.kycRepository.save(kyc);
+    const updatedKyc = await this.kycRepository.save(kyc);
 
-        // Update user KYC status
-        await this.userService.updateKycStatus(kyc.userId, KycStatus.REJECTED);
+    await this.userRepository.update(kyc.userId, { kycStatus: KycStatus.APPROVED });
 
-        this.logger.log(`KYC ${kycId} rejected by ${rejectedBy}: ${reason}`);
-
-        return savedKyc;
+    const user = await this.userRepository.findOne({ where: { id: kyc.userId } });
+    if (user) {
+      await this.notificationService.sendEmailVerifiedNotification(user);
     }
 
-    /**
-     * Return KYC for revisions
-     */
-    async returnKyc(kycId: string, returnedBy: string, reason: string): Promise<Kyc> {
-        const kyc = await this.getKycById(kycId);
+    return updatedKyc;
+  }
 
-        if (kyc.status !== KycStatus.SUBMITTED && kyc.status !== KycStatus.UNDER_REVIEW) {
-            throw new BadRequestException(`KYC cannot be returned from status: ${kyc.status}`);
-        }
+  async rejectKyc(kycId: string, reviewerId: string, reason: string): Promise<Kyc> {
+    const kyc = await this.getKycById(kycId);
 
-        kyc.status = KycStatus.RETURNED;
-        kyc.returnedAt = new Date();
-        kyc.returnedBy = returnedBy;
-        kyc.returnReason = reason;
-        kyc.reviewedAt = new Date();
-        kyc.reviewedBy = returnedBy;
-        kyc.updatedAt = new Date();
+    kyc.status = KycStatus.REJECTED;
+    kyc.reviewedBy = reviewerId;
+    kyc.reviewedAt = new Date();
+    kyc.rejectionReason = reason;
 
-        const savedKyc = await this.kycRepository.save(kyc);
+    const updatedKyc = await this.kycRepository.save(kyc);
 
-        this.logger.log(`KYC ${kycId} returned by ${returnedBy}: ${reason}`);
-
-        return savedKyc;
+    const user = await this.userRepository.findOne({ where: { id: kyc.userId } });
+    if (user) {
+      await this.notificationService.sendSecurityAlert(
+        user,
+        'KYC_REJECTED',
+        { reason }
+      );
     }
 
-    /**
-     * Expire KYC
-     */
-    async expireKyc(kycId: string): Promise<Kyc> {
-        const kyc = await this.getKycById(kycId);
+    return updatedKyc;
+  }
 
-        kyc.status = KycStatus.EXPIRED;
-        kyc.expiredAt = new Date();
-        kyc.updatedAt = new Date();
+  async returnKyc(kycId: string, reviewerId: string, reason: string): Promise<Kyc> {
+    const kyc = await this.getKycById(kycId);
 
-        const savedKyc = await this.kycRepository.save(kyc);
+    kyc.status = KycStatus.RETURNED;
+    kyc.reviewedBy = reviewerId;
+    kyc.reviewedAt = new Date();
+    kyc.returnReason = reason;
 
-        // Update user KYC status
-        await this.userService.updateKycStatus(kyc.userId, KycStatus.EXPIRED);
+    return this.kycRepository.save(kyc);
+  }
 
-        this.logger.log(`KYC ${kycId} expired`);
+  async expireKyc(kycId: string): Promise<Kyc> {
+    const kyc = await this.getKycById(kycId);
 
-        return savedKyc;
+    kyc.status = KycStatus.EXPIRED;
+    kyc.expiredAt = new Date();
+
+    return this.kycRepository.save(kyc);
+  }
+
+  async getAllKyc(
+    page: number = 1, 
+    limit: number = 10, 
+    filters?: { status?: string; userId?: string; startDate?: Date; endDate?: Date; }
+  ): Promise<{ items: Kyc[]; total: number }> {
+    const where: any = {};
+
+    if (filters?.status) where.status = filters.status;
+    if (filters?.userId) where.userId = filters.userId;
+    if (filters?.startDate || filters?.endDate) {
+      where.createdAt = Between(
+        filters.startDate || new Date(0),
+        filters.endDate || new Date()
+      );
     }
 
-    /**
-     * Get all KYC records with filters
-     */
-    async getAllKyc(filters?: {
-        status?: string;
-        level?: string;
-        startDate?: Date;
-        endDate?: Date;
-        limit?: number;
-        offset?: number;
-    }): Promise<{ items: Kyc[]; total: number }> {
-        const where: FindOptionsWhere<Kyc> = {};
+    const [items, total] = await this.kycRepository.findAndCount({
+      where,
+      relations: ['user', 'documents'],
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
 
-        if (filters?.status) {
-            where.status = filters.status as KycStatus;
-        }
+    return { items, total };
+  }
 
-        if (filters?.level) {
-            where.level = filters.level as KycLevel;
-        }
+  async getPendingKycCount(): Promise<number> {
+    return this.kycRepository.count({
+      where: { status: KycStatus.SUBMITTED }
+    });
+  }
 
-        if (filters?.startDate || filters?.endDate) {
-            where.submittedAt = Between(
-                filters.startDate || new Date('1970-01-01'),
-                filters.endDate || new Date(),
-            );
-        }
+  // ============ DOCUMENT METHODS ============
 
-        const [items, total] = await this.kycRepository.findAndCount({
-            where,
-            relations: ['user'],
-            take: filters?.limit || 20,
-            skip: filters?.offset || 0,
-            order: { createdAt: 'DESC' },
-        });
+  async uploadDocument(kycId: string, documentData: Partial<KycDocument>): Promise<KycDocument> {
+    const kyc = await this.getKycById(kycId);
 
-        return { items, total };
+    const document = this.kycDocumentRepository.create({
+      kycId,
+      ...documentData,
+      status: KycDocumentStatus.PENDING,
+      uploadedAt: new Date(),
+    });
+
+    return this.kycDocumentRepository.save(document);
+  }
+
+  async getDocumentById(id: string): Promise<KycDocument> {
+    const document = await this.kycDocumentRepository.findOne({
+      where: { id },
+      relations: ['kyc']
+    });
+
+    if (!document) {
+      throw new NotFoundException(`Document with ID ${id} not found`);
     }
 
-    /**
-     * Get pending KYC count
-     */
-    async getPendingKycCount(): Promise<number> {
-        return this.kycRepository.count({
-            where: {
-                status: In([KycStatus.SUBMITTED, KycStatus.UNDER_REVIEW]),
-            },
-        });
+    return document;
+  }
+
+  async getDocumentsByKycId(kycId: string): Promise<KycDocument[]> {
+    return this.kycDocumentRepository.find({
+      where: { kycId },
+      order: { uploadedAt: 'DESC' },
+    });
+  }
+
+  async verifyDocument(id: string, verifierId: string): Promise<KycDocument> {
+    const document = await this.getDocumentById(id);
+
+    document.status = KycDocumentStatus.VERIFIED;
+    document.verifiedBy = verifierId;
+    document.verifiedAt = new Date();
+
+    return this.kycDocumentRepository.save(document);
+  }
+
+  async rejectDocument(id: string, reason: string): Promise<KycDocument> {
+    const document = await this.getDocumentById(id);
+
+    document.status = KycDocumentStatus.REJECTED;
+    document.rejectionReason = reason;
+
+    return this.kycDocumentRepository.save(document);
+  }
+
+  async deleteDocument(id: string): Promise<void> {
+    await this.kycDocumentRepository.softDelete(id);
+  }
+
+  // ============ COMPLIANCE CHECK METHODS ============
+
+  async getComplianceCheckById(id: string): Promise<ComplianceCheck> {
+    const check = await this.complianceCheckRepository.findOne({
+      where: { id },
+      relations: ['user']
+    });
+
+    if (!check) {
+      throw new NotFoundException(`Compliance check with ID ${id} not found`);
     }
 
-    // ============ KYC DOCUMENT METHODS ============
+    return check;
+  }
 
-    /**
-     * Upload KYC document
-     */
-    async uploadDocument(kycId: string, documentData: any): Promise<KycDocument> {
-        await this.getKycById(kycId); // Verify KYC exists
+  async getComplianceChecksByUserId(userId: string): Promise<ComplianceCheck[]> {
+    return this.complianceCheckRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+  }
 
-        // Ensure all required fields are present
-        const document = this.kycDocumentRepository.create({
-            id: uuidv4(),
-            kycId,
-            type: documentData.type,
-            name: documentData.name,
-            fileName: documentData.fileName,
-            filePath: documentData.filePath,
-            fileSize: documentData.fileSize,
-            mimeType: documentData.mimeType,
-            status: KycDocumentStatus.UPLOADED,
-            uploadedAt: new Date(),
-            documentNumber: documentData.documentNumber,
-            issueDate: documentData.issueDate,
-            expiryDate: documentData.expiryDate,
-            countryOfIssue: documentData.countryOfIssue,
-            isFrontSide: documentData.isFrontSide ?? true,
-            extractedData: documentData.extractedData,
-            metadata: documentData.metadata,
-            notes: documentData.notes,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-        });
-
-        const savedDocument = await this.kycDocumentRepository.save(document);
-
-        this.logger.log(`Document uploaded for KYC ${kycId}`);
-
-        return savedDocument;
+  async runComplianceChecks(userId: string): Promise<ComplianceCheck[]> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
     }
 
-    /**
-     * Get document by ID
-     */
-    async getDocumentById(id: string): Promise<KycDocument> {
-        const document = await this.kycDocumentRepository.findOne({
-            where: { id },
-            relations: ['kyc'],
-        });
+    const checks: ComplianceCheck[] = [];
 
-        if (!document) {
-            throw new NotFoundException(`Document with ID ${id} not found`);
-        }
+    const identityCheck = this.complianceCheckRepository.create({
+      userId,
+      checkType: ComplianceCheckType.IDENTITY,
+      status: ComplianceCheckStatus.COMPLETED,
+      result: ComplianceCheckResult.PASS,
+      completedAt: new Date(),
+    });
+    checks.push(await this.complianceCheckRepository.save(identityCheck));
 
-        return document;
+    const sanctionsCheck = this.complianceCheckRepository.create({
+      userId,
+      checkType: ComplianceCheckType.SANCTIONS,
+      status: ComplianceCheckStatus.COMPLETED,
+      result: ComplianceCheckResult.PASS,
+      completedAt: new Date(),
+    });
+    checks.push(await this.complianceCheckRepository.save(sanctionsCheck));
+
+    const amlCheck = this.complianceCheckRepository.create({
+      userId,
+      checkType: ComplianceCheckType.AML,
+      status: ComplianceCheckStatus.COMPLETED,
+      result: ComplianceCheckResult.PASS,
+      completedAt: new Date(),
+    });
+    checks.push(await this.complianceCheckRepository.save(amlCheck));
+
+    return checks;
+  }
+
+  async getAllComplianceChecks(
+    page: number = 1, 
+    limit: number = 10, 
+    filters?: { userId?: string; checkType?: string; result?: string; startDate?: Date; endDate?: Date; }
+  ): Promise<{ items: ComplianceCheck[]; total: number }> {
+    const where: any = {};
+
+    if (filters?.userId) where.userId = filters.userId;
+    if (filters?.checkType) where.checkType = filters.checkType;
+    if (filters?.result) where.result = filters.result;
+    if (filters?.startDate || filters?.endDate) {
+      where.createdAt = Between(
+        filters.startDate || new Date(0),
+        filters.endDate || new Date()
+      );
     }
 
-    /**
-     * Get documents by KYC ID
-     */
-    async getDocumentsByKycId(kycId: string): Promise<KycDocument[]> {
-        return this.kycDocumentRepository.find({
-            where: { kycId },
-            order: { createdAt: 'DESC' },
-        });
+    const [items, total] = await this.complianceCheckRepository.findAndCount({
+      where,
+      relations: ['user'],
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return { items, total };
+  }
+
+  // ============ SANCTION SCREENING METHODS ============
+
+  async getSanctionScreeningById(id: string): Promise<SanctionScreening> {
+    const screening = await this.sanctionScreeningRepository.findOne({
+      where: { id },
+      relations: ['user']
+    });
+
+    if (!screening) {
+      throw new NotFoundException(`Sanction screening with ID ${id} not found`);
     }
 
-    /**
-     * Verify document
-     */
-    async verifyDocument(id: string, verifiedBy: string, notes?: string): Promise<KycDocument> {
-        const document = await this.getDocumentById(id);
+    return screening;
+  }
 
-        document.status = KycDocumentStatus.VERIFIED;
-        document.verifiedAt = new Date();
-        document.verifiedBy = verifiedBy;
-        if (notes !== undefined) {
-            document.notes = notes;
-        }
-        document.updatedAt = new Date();
+  async getSanctionScreeningsByUserId(userId: string): Promise<SanctionScreening[]> {
+    return this.sanctionScreeningRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+  }
 
-        const savedDocument = await this.kycDocumentRepository.save(document);
-
-        this.logger.log(`Document ${id} verified by ${verifiedBy}`);
-
-        return savedDocument;
+  async screenUser(userId: string): Promise<SanctionScreening> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
     }
 
-    /**
-     * Reject document
-     */
-    async rejectDocument(id: string, rejectedBy: string, reason: string): Promise<KycDocument> {
-        const document = await this.getDocumentById(id);
+    const screening = this.sanctionScreeningRepository.create({
+      userId,
+      status: SanctionScreeningStatus.COMPLETED,
+      matchStatus: SanctionMatchStatus.NO_MATCH,
+      riskLevel: RiskLevel.LOW,
+      matches: [],
+      screenedAt: new Date(),
+      completedAt: new Date(),
+    });
 
-        document.status = KycDocumentStatus.REJECTED;
-        document.rejectedAt = new Date();
-        document.rejectedBy = rejectedBy;
-        document.rejectionReason = reason;
-        document.updatedAt = new Date();
+    return this.sanctionScreeningRepository.save(screening);
+  }
 
-        const savedDocument = await this.kycDocumentRepository.save(document);
+  async getAllSanctionScreenings(
+    page: number = 1, 
+    limit: number = 10, 
+    filters?: { userId?: string; riskLevel?: string; matchStatus?: string; startDate?: Date; endDate?: Date; }
+  ): Promise<{ items: SanctionScreening[]; total: number }> {
+    const where: any = {};
 
-        this.logger.log(`Document ${id} rejected by ${rejectedBy}: ${reason}`);
-
-        return savedDocument;
+    if (filters?.userId) where.userId = filters.userId;
+    if (filters?.riskLevel) where.riskLevel = filters.riskLevel;
+    if (filters?.matchStatus) where.matchStatus = filters.matchStatus;
+    if (filters?.startDate || filters?.endDate) {
+      where.createdAt = Between(
+        filters.startDate || new Date(0),
+        filters.endDate || new Date()
+      );
     }
 
-    /**
-     * Delete document
-     */
-    async deleteDocument(id: string): Promise<void> {
-        const document = await this.getDocumentById(id);
-        await this.kycDocumentRepository.softRemove(document);
-        this.logger.log(`Document ${id} deleted`);
+    const [items, total] = await this.sanctionScreeningRepository.findAndCount({
+      where,
+      relations: ['user'],
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return { items, total };
+  }
+
+  // ============ AML ALERT METHODS ============
+
+  async getAmlAlertById(id: string): Promise<AmlAlert> {
+    const alert = await this.amlAlertRepository.findOne({
+      where: { id },
+      relations: ['user']
+    });
+
+    if (!alert) {
+      throw new NotFoundException(`AML alert with ID ${id} not found`);
     }
 
-    // ============ COMPLIANCE CHECKS METHODS ============
+    return alert;
+  }
 
-    /**
-     * Get compliance check by ID
-     */
-    async getComplianceCheckById(id: string): Promise<ComplianceCheck> {
-        const check = await this.complianceCheckRepository.findOne({
-            where: { id },
-            relations: ['user'],
-        });
+  async getAmlAlertsByUserId(userId: string): Promise<AmlAlert[]> {
+    return this.amlAlertRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+  }
 
-        if (!check) {
-            throw new NotFoundException(`Compliance check with ID ${id} not found`);
-        }
+  async acknowledgeAlert(alertId: string, userId: string): Promise<AmlAlert> {
+    const alert = await this.getAmlAlertById(alertId);
 
-        return check;
+    alert.acknowledgedBy = userId;
+    alert.acknowledgedAt = new Date();
+    alert.status = AmlAlertStatus.ACKNOWLEDGED;
+
+    return this.amlAlertRepository.save(alert);
+  }
+
+  async resolveAlert(alertId: string, userId: string, resolution: string): Promise<AmlAlert> {
+    const alert = await this.getAmlAlertById(alertId);
+
+    alert.resolvedBy = userId;
+    alert.resolvedAt = new Date();
+    alert.resolution = resolution;
+    alert.status = AmlAlertStatus.RESOLVED;
+
+    return this.amlAlertRepository.save(alert);
+  }
+
+  async escalateAlert(alertId: string, userId: string, reason: string): Promise<AmlAlert> {
+    const alert = await this.getAmlAlertById(alertId);
+
+    alert.escalatedBy = userId;
+    alert.escalatedAt = new Date();
+    alert.escalationReason = reason;
+    alert.status = AmlAlertStatus.ESCALATED;
+
+    return this.amlAlertRepository.save(alert);
+  }
+
+  async getAllAmlAlerts(
+    page: number = 1, 
+    limit: number = 10, 
+    filters?: { userId?: string; status?: AmlAlertStatus; severity?: AmlAlertSeverity; alertType?: AmlAlertType; startDate?: Date; endDate?: Date; }
+  ): Promise<{ items: AmlAlert[]; total: number }> {
+    const where: any = {};
+
+    if (filters?.userId) where.userId = filters.userId;
+    if (filters?.status) where.status = filters.status;
+    if (filters?.severity) where.severity = filters.severity;
+    if (filters?.alertType) where.alertType = filters.alertType;
+    if (filters?.startDate || filters?.endDate) {
+      where.createdAt = Between(
+        filters.startDate || new Date(0),
+        filters.endDate || new Date()
+      );
     }
 
-    /**
-     * Get compliance checks by user ID
-     */
-    async getComplianceChecksByUserId(userId: string): Promise<ComplianceCheck[]> {
-        return this.complianceCheckRepository.find({
-            where: { userId },
-            order: { createdAt: 'DESC' },
-        });
+    const [items, total] = await this.amlAlertRepository.findAndCount({
+      where,
+      relations: ['user'],
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return { items, total };
+  }
+
+  async getPendingAlertsCount(): Promise<number> {
+    return this.amlAlertRepository.count({
+      where: { status: AmlAlertStatus.PENDING }
+    });
+  }
+
+  // ============ USER COMPLIANCE METHODS ============
+
+  async getUserComplianceStatus(userId: string): Promise<any> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
     }
 
-    /**
-     * Run compliance checks for a user
-     */
-    async runComplianceChecks(userId: string): Promise<ComplianceCheck[]> {
-        // Verify user exists
-        await this.userService.findById(userId);
+    const kyc = await this.kycRepository.findOne({ where: { userId } });
+    const checks = await this.complianceCheckRepository.count({ where: { userId } });
+    const alerts = await this.amlAlertRepository.count({ where: { userId, status: AmlAlertStatus.PENDING } });
 
-        const checks: ComplianceCheck[] = [];
+    return {
+      userId,
+      kycStatus: kyc?.status || KycStatus.NOT_STARTED,
+      kycSubmitted: !!kyc?.submittedAt,
+      kycApproved: kyc?.status === KycStatus.APPROVED,
+      complianceChecks: checks,
+      pendingAlerts: alerts,
+      isCompliant: kyc?.status === KycStatus.APPROVED && alerts === 0,
+    };
+  }
 
-        // Run AML check
-        const amlCheck = await this.runAmlCheck(userId);
-        checks.push(amlCheck);
-
-        // Run sanctions check
-        const sanctionsCheck = await this.runSanctionsCheck(userId);
-        checks.push(sanctionsCheck);
-
-        // Run PEP check
-        const pepCheck = await this.runPepCheck(userId);
-        checks.push(pepCheck);
-
-        // Run adverse media check
-        const adverseMediaCheck = await this.runAdverseMediaCheck(userId);
-        checks.push(adverseMediaCheck);
-
-        this.logger.log(`Compliance checks completed for user ${userId}`);
-
-        return checks;
+  async getUserComplianceSummary(userId: string): Promise<any> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
     }
 
-    /**
-     * Run AML check
-     */
-    private async runAmlCheck(userId: string): Promise<ComplianceCheck> {
-        const check = this.complianceCheckRepository.create({
-            id: uuidv4(),
-            userId,
-            type: ComplianceCheckType.AML,
-            status: ComplianceCheckStatus.COMPLETED,
-            result: ComplianceCheckResult.PASS,
-            score: 25,
-            confidence: 0.95,
-            performedAt: new Date(),
-            completedAt: new Date(),
-            expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
-            metadata: { source: 'automated_screening' },
-            createdAt: new Date(),
-            updatedAt: new Date(),
-        });
+    const kyc = await this.kycRepository.findOne({ 
+      where: { userId },
+      relations: ['documents']
+    });
 
-        return this.complianceCheckRepository.save(check);
+    const checks = await this.complianceCheckRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+
+    const sanctions = await this.sanctionScreeningRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+
+    const alerts = await this.amlAlertRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      },
+      kyc,
+      complianceChecks: checks,
+      sanctionScreenings: sanctions,
+      amlAlerts: alerts,
+    };
+  }
+
+  async initializeUserCompliance(userId: string): Promise<any> {
+    const kyc = await this.initiateKyc(userId);
+    const checks = await this.runComplianceChecks(userId);
+    const screening = await this.screenUser(userId);
+
+    return {
+      kyc,
+      checks,
+      screening,
+    };
+  }
+
+  async refreshUserCompliance(userId: string): Promise<any> {
+    const checks = await this.runComplianceChecks(userId);
+    const screening = await this.screenUser(userId);
+
+    return {
+      checks,
+      screening,
+    };
+  }
+
+  // ============ STATISTICS METHODS ============
+
+  async getComplianceStatistics(): Promise<any> {
+    const totalKyc = await this.kycRepository.count();
+    const pendingKyc = await this.kycRepository.count({ 
+      where: { status: KycStatus.SUBMITTED } 
+    });
+    const approvedKyc = await this.kycRepository.count({ 
+      where: { status: KycStatus.APPROVED } 
+    });
+    const rejectedKyc = await this.kycRepository.count({ 
+      where: { status: KycStatus.REJECTED } 
+    });
+
+    const totalChecks = await this.complianceCheckRepository.count();
+    const failedChecks = await this.complianceCheckRepository.count({ 
+      where: { result: ComplianceCheckResult.FAIL } 
+    });
+
+    const totalAlerts = await this.amlAlertRepository.count();
+    const pendingAlerts = await this.amlAlertRepository.count({ 
+      where: { status: AmlAlertStatus.PENDING } 
+    });
+
+    return {
+      kyc: {
+        total: totalKyc,
+        pending: pendingKyc,
+        approved: approvedKyc,
+        rejected: rejectedKyc,
+        approvalRate: totalKyc > 0 ? (approvedKyc / totalKyc) * 100 : 0,
+      },
+      complianceChecks: {
+        total: totalChecks,
+        failed: failedChecks,
+        passRate: totalChecks > 0 ? ((totalChecks - failedChecks) / totalChecks) * 100 : 0,
+      },
+      amlAlerts: {
+        total: totalAlerts,
+        pending: pendingAlerts,
+        resolutionRate: totalAlerts > 0 ? ((totalAlerts - pendingAlerts) / totalAlerts) * 100 : 0,
+      },
+    };
+  }
+
+  async getKycStatistics(timeframe?: string): Promise<any> {
+    const now = new Date();
+    let startDate: Date;
+
+    switch (timeframe) {
+      case 'day':
+        startDate = new Date(now.setDate(now.getDate() - 1));
+        break;
+      case 'week':
+        startDate = new Date(now.setDate(now.getDate() - 7));
+        break;
+      case 'month':
+        startDate = new Date(now.setMonth(now.getMonth() - 1));
+        break;
+      case 'year':
+        startDate = new Date(now.setFullYear(now.getFullYear() - 1));
+        break;
+      default:
+        startDate = new Date(0);
     }
 
-    /**
-     * Run sanctions check
-     */
-    private async runSanctionsCheck(userId: string): Promise<ComplianceCheck> {
-        const check = this.complianceCheckRepository.create({
-            id: uuidv4(),
-            userId,
-            type: ComplianceCheckType.SANCTIONS,
-            status: ComplianceCheckStatus.COMPLETED,
-            result: ComplianceCheckResult.PASS,
-            score: 0,
-            confidence: 0.98,
-            performedAt: new Date(),
-            completedAt: new Date(),
-            expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
-            metadata: { lists: ['ofac', 'un', 'eu'] },
-            createdAt: new Date(),
-            updatedAt: new Date(),
-        });
+    const kycList = await this.kycRepository.find({
+      where: {
+        createdAt: Between(startDate, new Date()),
+      },
+    });
 
-        return this.complianceCheckRepository.save(check);
+    const byStatus = {
+      initiated: kycList.filter(k => k.status === KycStatus.INITIATED).length,
+      submitted: kycList.filter(k => k.status === KycStatus.SUBMITTED).length,
+      approved: kycList.filter(k => k.status === KycStatus.APPROVED).length,
+      rejected: kycList.filter(k => k.status === KycStatus.REJECTED).length,
+      returned: kycList.filter(k => k.status === KycStatus.RETURNED).length,
+      expired: kycList.filter(k => k.status === KycStatus.EXPIRED).length,
+    };
+
+    return {
+      timeframe,
+      total: kycList.length,
+      byStatus,
+    };
+  }
+
+  async getAmlAlertsStatistics(timeframe?: string): Promise<any> {
+    const now = new Date();
+    let startDate: Date;
+
+    switch (timeframe) {
+      case 'day':
+        startDate = new Date(now.setDate(now.getDate() - 1));
+        break;
+      case 'week':
+        startDate = new Date(now.setDate(now.getDate() - 7));
+        break;
+      case 'month':
+        startDate = new Date(now.setMonth(now.getMonth() - 1));
+        break;
+      case 'year':
+        startDate = new Date(now.setFullYear(now.getFullYear() - 1));
+        break;
+      default:
+        startDate = new Date(0);
     }
 
-    /**
-     * Run PEP check
-     */
-    private async runPepCheck(userId: string): Promise<ComplianceCheck> {
-        const check = this.complianceCheckRepository.create({
-            id: uuidv4(),
-            userId,
-            type: ComplianceCheckType.PEP,
-            status: ComplianceCheckStatus.COMPLETED,
-            result: ComplianceCheckResult.PASS,
-            score: 0,
-            confidence: 0.99,
-            performedAt: new Date(),
-            completedAt: new Date(),
-            expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
-            createdAt: new Date(),
-            updatedAt: new Date(),
-        });
+    const alerts = await this.amlAlertRepository.find({
+      where: {
+        createdAt: Between(startDate, new Date()),
+      },
+    });
 
-        return this.complianceCheckRepository.save(check);
+    const bySeverity = {
+      low: alerts.filter(a => a.severity === AmlAlertSeverity.LOW).length,
+      medium: alerts.filter(a => a.severity === AmlAlertSeverity.MEDIUM).length,
+      high: alerts.filter(a => a.severity === AmlAlertSeverity.HIGH).length,
+      critical: alerts.filter(a => a.severity === AmlAlertSeverity.CRITICAL).length,
+    };
+
+    const byStatus = {
+      pending: alerts.filter(a => a.status === AmlAlertStatus.PENDING).length,
+      acknowledged: alerts.filter(a => a.status === AmlAlertStatus.ACKNOWLEDGED).length,
+      resolved: alerts.filter(a => a.status === AmlAlertStatus.RESOLVED).length,
+      escalated: alerts.filter(a => a.status === AmlAlertStatus.ESCALATED).length,
+    };
+
+    return {
+      timeframe,
+      total: alerts.length,
+      bySeverity,
+      byStatus,
+    };
+  }
+
+  async getSanctionsStatistics(timeframe?: string): Promise<any> {
+    const now = new Date();
+    let startDate: Date;
+
+    switch (timeframe) {
+      case 'day':
+        startDate = new Date(now.setDate(now.getDate() - 1));
+        break;
+      case 'week':
+        startDate = new Date(now.setDate(now.getDate() - 7));
+        break;
+      case 'month':
+        startDate = new Date(now.setMonth(now.getMonth() - 1));
+        break;
+      case 'year':
+        startDate = new Date(now.setFullYear(now.getFullYear() - 1));
+        break;
+      default:
+        startDate = new Date(0);
     }
 
-    /**
-     * Run adverse media check
-     */
-    private async runAdverseMediaCheck(userId: string): Promise<ComplianceCheck> {
-        const check = this.complianceCheckRepository.create({
-            id: uuidv4(),
-            userId,
-            type: ComplianceCheckType.ADVERSE_MEDIA,
-            status: ComplianceCheckStatus.COMPLETED,
-            result: ComplianceCheckResult.PASS,
-            score: 0,
-            confidence: 0.85,
-            performedAt: new Date(),
-            completedAt: new Date(),
-            expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
-            createdAt: new Date(),
-            updatedAt: new Date(),
-        });
+    const screenings = await this.sanctionScreeningRepository.find({
+      where: {
+        createdAt: Between(startDate, new Date()),
+      },
+    });
 
-        return this.complianceCheckRepository.save(check);
+    const byRiskLevel = {
+      low: screenings.filter(s => s.riskLevel === RiskLevel.LOW).length,
+      medium: screenings.filter(s => s.riskLevel === RiskLevel.MEDIUM).length,
+      high: screenings.filter(s => s.riskLevel === RiskLevel.HIGH).length,
+      critical: screenings.filter(s => s.riskLevel === RiskLevel.CRITICAL).length,
+    };
+
+    const withMatches = screenings.filter(s => s.matches && s.matches.length > 0).length;
+
+    return {
+      timeframe,
+      total: screenings.length,
+      byRiskLevel,
+      withMatches,
+      matchRate: screenings.length > 0 ? (withMatches / screenings.length) * 100 : 0,
+    };
+  }
+
+  // ============ REPORTING METHODS ============
+
+  async generateDailyReport(date?: Date): Promise<any> {
+    const reportDate = date || new Date();
+    const startOfDay = new Date(reportDate.setHours(0, 0, 0, 0));
+    const endOfDay = new Date(reportDate.setHours(23, 59, 59, 999));
+
+    const kycSubmitted = await this.kycRepository.count({
+      where: {
+        submittedAt: Between(startOfDay, endOfDay),
+      },
+    });
+
+    const kycApproved = await this.kycRepository.count({
+      where: {
+        reviewedAt: Between(startOfDay, endOfDay),
+        status: KycStatus.APPROVED,
+      },
+    });
+
+    const kycRejected = await this.kycRepository.count({
+      where: {
+        reviewedAt: Between(startOfDay, endOfDay),
+        status: KycStatus.REJECTED,
+      },
+    });
+
+    const alertsGenerated = await this.amlAlertRepository.count({
+      where: {
+        createdAt: Between(startOfDay, endOfDay),
+      },
+    });
+
+    return {
+      date: startOfDay.toISOString().split('T')[0],
+      kyc: {
+        submitted: kycSubmitted,
+        approved: kycApproved,
+        rejected: kycRejected,
+      },
+      alerts: {
+        generated: alertsGenerated,
+      },
+    };
+  }
+
+  async generateWeeklyReport(): Promise<any> {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 7);
+
+    const kycSubmitted = await this.kycRepository.count({
+      where: {
+        submittedAt: Between(startDate, endDate),
+      },
+    });
+
+    const kycApproved = await this.kycRepository.count({
+      where: {
+        reviewedAt: Between(startDate, endDate),
+        status: KycStatus.APPROVED,
+      },
+    });
+
+    const checksRun = await this.complianceCheckRepository.count({
+      where: {
+        createdAt: Between(startDate, endDate),
+      },
+    });
+
+    const alertsGenerated = await this.amlAlertRepository.count({
+      where: {
+        createdAt: Between(startDate, endDate),
+      },
+    });
+
+    return {
+      weekStarting: startDate.toISOString().split('T')[0],
+      weekEnding: endDate.toISOString().split('T')[0],
+      kyc: {
+        submitted: kycSubmitted,
+        approved: kycApproved,
+      },
+      compliance: {
+        checksRun,
+      },
+      alerts: {
+        generated: alertsGenerated,
+      },
+    };
+  }
+
+  async generateMonthlyReport(): Promise<any> {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setMonth(startDate.getMonth() - 1);
+
+    const kycSubmitted = await this.kycRepository.count({
+      where: {
+        submittedAt: Between(startDate, endDate),
+      },
+    });
+
+    const kycApproved = await this.kycRepository.count({
+      where: {
+        reviewedAt: Between(startDate, endDate),
+        status: KycStatus.APPROVED,
+      },
+    });
+
+    const checksRun = await this.complianceCheckRepository.count({
+      where: {
+        createdAt: Between(startDate, endDate),
+      },
+    });
+
+    const screeningsRun = await this.sanctionScreeningRepository.count({
+      where: {
+        createdAt: Between(startDate, endDate),
+      },
+    });
+
+    const alertsGenerated = await this.amlAlertRepository.count({
+      where: {
+        createdAt: Between(startDate, endDate),
+      },
+    });
+
+    const alertsResolved = await this.amlAlertRepository.count({
+      where: {
+        resolvedAt: Between(startDate, endDate),
+      },
+    });
+
+    return {
+      month: startDate.toLocaleString('default', { month: 'long' }),
+      year: startDate.getFullYear(),
+      kyc: {
+        submitted: kycSubmitted,
+        approved: kycApproved,
+      },
+      compliance: {
+        checksRun,
+        screeningsRun,
+      },
+      alerts: {
+        generated: alertsGenerated,
+        resolved: alertsResolved,
+      },
+    };
+  }
+
+  // ============ DASHBOARD METHODS ============
+
+  async getDashboardSummary(): Promise<any> {
+    const [
+      pendingKyc,
+      pendingAlerts,
+      totalUsers,
+      totalKyc,
+      recentKyc,
+      recentAlerts
+    ] = await Promise.all([
+      this.kycRepository.count({ where: { status: KycStatus.SUBMITTED } }),
+      this.amlAlertRepository.count({ where: { status: AmlAlertStatus.PENDING } }),
+      this.userRepository.count(),
+      this.kycRepository.count(),
+      this.kycRepository.find({
+        where: { status: KycStatus.SUBMITTED },
+        relations: ['user'],
+        order: { submittedAt: 'DESC' },
+        take: 5,
+      }),
+      this.amlAlertRepository.find({
+        where: { status: AmlAlertStatus.PENDING },
+        relations: ['user'],
+        order: { createdAt: 'DESC' },
+        take: 5,
+      }),
+    ]);
+
+    return {
+      summary: {
+        pendingKyc,
+        pendingAlerts,
+        totalUsers,
+        totalKyc,
+        completionRate: totalUsers > 0 ? (totalKyc / totalUsers) * 100 : 0,
+      },
+      recentKyc,
+      recentAlerts,
+    };
+  }
+
+  async getRecentActivity(limit: number = 10): Promise<any[]> {
+    const activities = [];
+
+    const recentKyc = await this.kycRepository.find({
+      where: { status: KycStatus.SUBMITTED },
+      relations: ['user'],
+      order: { submittedAt: 'DESC' },
+      take: limit,
+    });
+
+    recentKyc.forEach(kyc => {
+      activities.push({
+        type: 'kyc_submission',
+        id: kyc.id,
+        user: kyc.user ? `${kyc.user.firstName} ${kyc.user.lastName}` : 'Unknown',
+        timestamp: kyc.submittedAt,
+        description: `KYC submitted by user`,
+      });
+    });
+
+    const recentAlerts = await this.amlAlertRepository.find({
+      relations: ['user'],
+      order: { createdAt: 'DESC' },
+      take: limit,
+    });
+
+    recentAlerts.forEach(alert => {
+      activities.push({
+        type: 'aml_alert',
+        id: alert.id,
+        user: alert.user ? `${alert.user.firstName} ${alert.user.lastName}` : 'Unknown',
+        timestamp: alert.createdAt,
+        severity: alert.severity,
+        description: alert.description,
+      });
+    });
+
+    return activities.sort((a, b) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    ).slice(0, limit);
+  }
+
+  async getPendingItems(): Promise<any> {
+    const [pendingKyc, pendingAlerts] = await Promise.all([
+      this.kycRepository.find({
+        where: { status: KycStatus.SUBMITTED },
+        relations: ['user'],
+        order: { submittedAt: 'ASC' },
+      }),
+      this.amlAlertRepository.find({
+        where: { status: AmlAlertStatus.PENDING },
+        relations: ['user'],
+        order: { createdAt: 'ASC' },
+      }),
+    ]);
+
+    return {
+      kyc: pendingKyc.map(k => ({
+        id: k.id,
+        user: k.user ? `${k.user.firstName} ${k.user.lastName}` : 'Unknown',
+        submittedAt: k.submittedAt,
+      })),
+      alerts: pendingAlerts.map(a => ({
+        id: a.id,
+        user: a.user ? `${a.user.firstName} ${a.user.lastName}` : 'Unknown',
+        severity: a.severity,
+        createdAt: a.createdAt,
+        description: a.description,
+      })),
+    };
+  }
+
+  // ============ HEALTH CHECK ============
+
+  async healthCheck(): Promise<any> {
+    try {
+      await this.kycRepository.count({ take: 1 });
+
+      return {
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        services: {
+          database: 'connected',
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Health check failed: ${error.message}`);
+      return {
+        status: 'unhealthy',
+        timestamp: new Date().toISOString(),
+        error: error.message,
+      };
     }
-
-    /**
-     * Get all compliance checks with filters
-     */
-    async getAllComplianceChecks(filters?: {
-        type?: string;
-        status?: string;
-        result?: string;
-        startDate?: Date;
-        endDate?: Date;
-        limit?: number;
-        offset?: number;
-    }): Promise<{ items: ComplianceCheck[]; total: number }> {
-        const where: FindOptionsWhere<ComplianceCheck> = {};
-
-        if (filters?.type) {
-            where.type = filters.type as ComplianceCheckType;
-        }
-
-        if (filters?.status) {
-            where.status = filters.status as ComplianceCheckStatus;
-        }
-
-        if (filters?.result) {
-            where.result = filters.result as ComplianceCheckResult;
-        }
-
-        if (filters?.startDate || filters?.endDate) {
-            where.performedAt = Between(
-                filters.startDate || new Date('1970-01-01'),
-                filters.endDate || new Date(),
-            );
-        }
-
-        const [items, total] = await this.complianceCheckRepository.findAndCount({
-            where,
-            relations: ['user'],
-            take: filters?.limit || 20,
-            skip: filters?.offset || 0,
-            order: { createdAt: 'DESC' },
-        });
-
-        return { items, total };
-    }
-
-    // ============ SANCTION SCREENING METHODS ============
-
-    /**
-     * Get sanction screening by ID
-     */
-    async getSanctionScreeningById(id: string): Promise<SanctionScreening> {
-        const screening = await this.sanctionScreeningRepository.findOne({
-            where: { id },
-            relations: ['user'],
-        });
-
-        if (!screening) {
-            throw new NotFoundException(`Sanction screening with ID ${id} not found`);
-        }
-
-        return screening;
-    }
-
-    /**
-     * Get sanction screenings by user ID
-     */
-    async getSanctionScreeningsByUserId(userId: string): Promise<SanctionScreening[]> {
-        return this.sanctionScreeningRepository.find({
-            where: { userId },
-            order: { createdAt: 'DESC' },
-        });
-    }
-
-    /**
-     * Screen user against sanctions lists
-     */
-    async screenUser(userId: string): Promise<SanctionScreening> {
-        // Verify user exists
-        await this.userService.findById(userId);
-
-        const screening = this.sanctionScreeningRepository.create({
-            id: uuidv4(),
-            userId,
-            status: SanctionScreeningStatus.COMPLETED,
-            matchStatus: SanctionMatchStatus.NO_MATCH,
-            listsScreened: [SanctionList.OFAC, SanctionList.UN, SanctionList.EU],
-            listsWithMatches: [],
-            matches: [],
-            confidenceScore: 100,
-            provider: 'world-check',
-            providerReference: `wc_${Date.now()}`,
-            screenedAt: new Date(),
-            createdAt: new Date(),
-            updatedAt: new Date(),
-        });
-
-        const savedScreening = await this.sanctionScreeningRepository.save(screening);
-
-        this.logger.log(`Sanction screening completed for user ${userId}`);
-
-        return savedScreening;
-    }
-
-    /**
-     * Get all sanction screenings with filters
-     */
-    async getAllSanctionScreenings(filters?: {
-        list?: string;
-        status?: string;
-        match?: string;
-        startDate?: Date;
-        endDate?: Date;
-        limit?: number;
-        offset?: number;
-    }): Promise<{ items: SanctionScreening[]; total: number }> {
-        const where: FindOptionsWhere<SanctionScreening> = {};
-
-        if (filters?.status) {
-            where.status = filters.status as SanctionScreeningStatus;
-        }
-
-        if (filters?.match) {
-            where.matchStatus = filters.match as SanctionMatchStatus;
-        }
-
-        if (filters?.startDate || filters?.endDate) {
-            where.screenedAt = Between(
-                filters.startDate || new Date('1970-01-01'),
-                filters.endDate || new Date(),
-            );
-        }
-
-        const [items, total] = await this.sanctionScreeningRepository.findAndCount({
-            where,
-            relations: ['user'],
-            take: filters?.limit || 20,
-            skip: filters?.offset || 0,
-            order: { createdAt: 'DESC' },
-        });
-
-        return { items, total };
-    }
-
-    // ============ AML ALERT METHODS ============
-
-    /**
-     * Get AML alert by ID
-     */
-    async getAmlAlertById(id: string): Promise<AmlAlert> {
-        const alert = await this.amlAlertRepository.findOne({
-            where: { id },
-            relations: ['user'],
-        });
-
-        if (!alert) {
-            throw new NotFoundException(`AML alert with ID ${id} not found`);
-        }
-
-        return alert;
-    }
-
-    /**
-     * Get AML alerts by user ID
-     */
-    async getAmlAlertsByUserId(userId: string): Promise<AmlAlert[]> {
-        return this.amlAlertRepository.find({
-            where: { userId },
-            order: { createdAt: 'DESC' },
-        });
-    }
-
-    /**
-     * Acknowledge AML alert
-     */
-    async acknowledgeAlert(id: string, acknowledgedBy: string): Promise<AmlAlert> {
-        const alert = await this.getAmlAlertById(id);
-
-        alert.status = AmlAlertStatus.ACKNOWLEDGED;
-        alert.acknowledgedAt = new Date();
-        alert.acknowledgedBy = acknowledgedBy;
-        alert.updatedAt = new Date();
-
-        const savedAlert = await this.amlAlertRepository.save(alert);
-
-        this.logger.log(`AML alert ${id} acknowledged by ${acknowledgedBy}`);
-
-        return savedAlert;
-    }
-
-    /**
-     * Resolve AML alert
-     */
-    async resolveAlert(
-        id: string,
-        resolvedBy: string,
-        resolution: string,
-        notes?: string,
-    ): Promise<AmlAlert> {
-        const alert = await this.getAmlAlertById(id);
-
-        alert.status = AmlAlertStatus.RESOLVED;
-        alert.resolvedAt = new Date();
-        alert.resolvedBy = resolvedBy;
-        alert.resolution = resolution;
-        if (notes !== undefined) {
-            alert.notes = notes;
-        }
-        alert.updatedAt = new Date();
-
-        const savedAlert = await this.amlAlertRepository.save(alert);
-
-        this.logger.log(`AML alert ${id} resolved by ${resolvedBy}: ${resolution}`);
-
-        return savedAlert;
-    }
-
-    /**
-     * Escalate AML alert
-     */
-    async escalateAlert(
-        id: string,
-        escalatedBy: string,
-        reason: string,
-        assignedTo?: string,
-    ): Promise<AmlAlert> {
-        const alert = await this.getAmlAlertById(id);
-
-        alert.status = AmlAlertStatus.ESCALATED;
-        alert.escalatedAt = new Date();
-        alert.escalatedBy = escalatedBy;
-        alert.escalationReason = reason;
-        alert.assignedTo = assignedTo || alert.assignedTo;
-        alert.updatedAt = new Date();
-
-        const savedAlert = await this.amlAlertRepository.save(alert);
-
-        this.logger.log(`AML alert ${id} escalated by ${escalatedBy}: ${reason}`);
-
-        return savedAlert;
-    }
-
-    /**
-     * Get all AML alerts with filters
-     */
-    async getAllAmlAlerts(filters?: {
-        severity?: string;
-        status?: string;
-        type?: string;
-        startDate?: Date;
-        endDate?: Date;
-        limit?: number;
-        offset?: number;
-    }): Promise<{ items: AmlAlert[]; total: number }> {
-        const where: FindOptionsWhere<AmlAlert> = {};
-
-        if (filters?.severity) {
-            where.severity = filters.severity as AmlAlertSeverity;
-        }
-
-        if (filters?.status) {
-            where.status = filters.status as AmlAlertStatus;
-        }
-
-        if (filters?.type) {
-            where.type = filters.type as AmlAlertType;
-        }
-
-        if (filters?.startDate || filters?.endDate) {
-            where.createdAt = Between(
-                filters.startDate || new Date('1970-01-01'),
-                filters.endDate || new Date(),
-            );
-        }
-
-        const [items, total] = await this.amlAlertRepository.findAndCount({
-            where,
-            relations: ['user'],
-            take: filters?.limit || 20,
-            skip: filters?.offset || 0,
-            order: { createdAt: 'DESC' },
-        });
-
-        return { items, total };
-    }
-
-    /**
-     * Get pending alerts count
-     */
-    async getPendingAlertsCount(): Promise<number> {
-        return this.amlAlertRepository.count({
-            where: {
-                status: In([AmlAlertStatus.NEW, AmlAlertStatus.ACKNOWLEDGED]),
-            },
-        });
-    }
-
-    // ============ USER COMPLIANCE METHODS ============
-
-    /**
-     * Initialize compliance for a user
-     */
-    async initializeUserCompliance(userId: string): Promise<void> {
-        this.logger.log(`Initializing compliance for user ${userId}`);
-
-        // Create KYC record
-        try {
-            await this.initiateKyc(userId);
-        } catch (error) {
-            if (!(error instanceof ConflictException)) {
-                throw error;
-            }
-        }
-
-        // Run initial compliance checks
-        await this.runComplianceChecks(userId);
-
-        // Screen against sanctions
-        await this.screenUser(userId);
-
-        this.logger.log(`Compliance initialized for user ${userId}`);
-    }
-
-    /**
-     * Get user compliance status
-     */
-    async getUserComplianceStatus(userId: string): Promise<{
-        kycStatus: string;
-        amlStatus: string;
-        sanctionsStatus: string;
-        pepStatus: string;
-        overallStatus: string;
-        lastUpdated: Date;
-    }> {
-        const kyc = await this.kycRepository.findOne({
-            where: { userId },
-            order: { createdAt: 'DESC' },
-        });
-
-        const amlCheck = await this.complianceCheckRepository.findOne({
-            where: { userId, type: ComplianceCheckType.AML },
-            order: { createdAt: 'DESC' },
-        });
-
-        const sanctionsCheck = await this.complianceCheckRepository.findOne({
-            where: { userId, type: ComplianceCheckType.SANCTIONS },
-            order: { createdAt: 'DESC' },
-        });
-
-        const pepCheck = await this.complianceCheckRepository.findOne({
-            where: { userId, type: ComplianceCheckType.PEP },
-            order: { createdAt: 'DESC' },
-        });
-
-        const lastUpdated = [
-            kyc?.updatedAt,
-            amlCheck?.updatedAt,
-            sanctionsCheck?.updatedAt,
-            pepCheck?.updatedAt,
-        ]
-            .filter(Boolean)
-            .sort((a, b) => b.getTime() - a.getTime())[0] || new Date();
-
-        let overallStatus = 'PENDING_REVIEW';
-        if (
-            kyc?.status === KycStatus.VERIFIED &&
-            amlCheck?.result === ComplianceCheckResult.PASS &&
-            sanctionsCheck?.result === ComplianceCheckResult.PASS &&
-            pepCheck?.result === ComplianceCheckResult.PASS
-        ) {
-            overallStatus = 'COMPLIANT';
-        } else if (
-            kyc?.status === KycStatus.REJECTED ||
-            amlCheck?.result === ComplianceCheckResult.FAIL ||
-            sanctionsCheck?.result === ComplianceCheckResult.FAIL ||
-            pepCheck?.result === ComplianceCheckResult.FAIL
-        ) {
-            overallStatus = 'NON_COMPLIANT';
-        }
-
-        return {
-            kycStatus: kyc?.status || KycStatus.NOT_STARTED,
-            amlStatus: amlCheck?.result || 'PENDING',
-            sanctionsStatus: sanctionsCheck?.result || 'PENDING',
-            pepStatus: pepCheck?.result || 'PENDING',
-            overallStatus,
-            lastUpdated,
-        };
-    }
-
-    /**
-     * Get user compliance summary
-     */
-    async getUserComplianceSummary(userId: string): Promise<any> {
-        const [kyc, checks, screenings, alerts] = await Promise.all([
-            this.getKycByUserId(userId).catch(() => null),
-            this.getComplianceChecksByUserId(userId),
-            this.getSanctionScreeningsByUserId(userId),
-            this.getAmlAlertsByUserId(userId),
-        ]);
-
-        // Get documents count if kyc exists
-        let documentsCount = 0;
-        if (kyc && kyc.id) {
-            const documents = await this.kycDocumentRepository.count({
-                where: { kycId: kyc.id }
-            });
-            documentsCount = documents;
-        }
-
-        return {
-            kyc: kyc ? {
-                id: kyc.id,
-                status: kyc.status,
-                level: kyc.level,
-                submittedAt: kyc.submittedAt,
-                verifiedAt: kyc.approvedAt,
-                documentsCount: documentsCount,
-                fullName: kyc.fullName,
-            } : null,
-            complianceChecks: {
-                total: checks.length,
-                passed: checks.filter(c => c.result === ComplianceCheckResult.PASS).length,
-                failed: checks.filter(c => c.result === ComplianceCheckResult.FAIL).length,
-                pending: checks.filter(c => c.status === ComplianceCheckStatus.PENDING).length,
-            },
-            sanctionsScreenings: {
-                total: screenings.length,
-                withMatches: screenings.filter(s => s.hasMatches).length,
-                lastScreened: screenings[0]?.screenedAt,
-            },
-            amlAlerts: {
-                total: alerts.length,
-                open: alerts.filter(a =>
-                    a.status === AmlAlertStatus.NEW ||
-                    a.status === AmlAlertStatus.ACKNOWLEDGED
-                ).length,
-                resolved: alerts.filter(a => a.status === AmlAlertStatus.RESOLVED).length,
-            },
-        };
-    }
-
-    /**
-     * Refresh all compliance checks for a user
-     */
-    async refreshUserCompliance(userId: string): Promise<void> {
-        this.logger.log(`Refreshing compliance for user ${userId}`);
-
-        // Run new compliance checks
-        await this.runComplianceChecks(userId);
-
-        // Screen against sanctions
-        await this.screenUser(userId);
-
-        this.logger.log(`Compliance refreshed for user ${userId}`);
-    }
-
-    // ============ REPORTING & STATISTICS METHODS ============
-
-    /**
-     * Get compliance statistics
-     */
-    async getComplianceStatistics(): Promise<any> {
-        const [
-            totalKyc,
-            pendingKyc,
-            verifiedKyc,
-            rejectedKyc,
-            totalChecks,
-            passedChecks,
-            failedChecks,
-            totalAlerts,
-            openAlerts,
-            resolvedAlerts,
-        ] = await Promise.all([
-            this.kycRepository.count(),
-            this.kycRepository.count({ where: { status: In([KycStatus.SUBMITTED, KycStatus.UNDER_REVIEW]) } }),
-            this.kycRepository.count({ where: { status: KycStatus.VERIFIED } }),
-            this.kycRepository.count({ where: { status: KycStatus.REJECTED } }),
-            this.complianceCheckRepository.count(),
-            this.complianceCheckRepository.count({ where: { result: ComplianceCheckResult.PASS } }),
-            this.complianceCheckRepository.count({ where: { result: ComplianceCheckResult.FAIL } }),
-            this.amlAlertRepository.count(),
-            this.amlAlertRepository.count({ where: { status: In([AmlAlertStatus.NEW, AmlAlertStatus.ACKNOWLEDGED]) } }),
-            this.amlAlertRepository.count({ where: { status: AmlAlertStatus.RESOLVED } }),
-        ]);
-
-        return {
-            kyc: {
-                total: totalKyc,
-                pending: pendingKyc,
-                verified: verifiedKyc,
-                rejected: rejectedKyc,
-                verificationRate: totalKyc > 0 ? (verifiedKyc / totalKyc) * 100 : 0,
-            },
-            complianceChecks: {
-                total: totalChecks,
-                passed: passedChecks,
-                failed: failedChecks,
-                passRate: totalChecks > 0 ? (passedChecks / totalChecks) * 100 : 0,
-            },
-            amlAlerts: {
-                total: totalAlerts,
-                open: openAlerts,
-                resolved: resolvedAlerts,
-                resolutionRate: totalAlerts > 0 ? (resolvedAlerts / totalAlerts) * 100 : 0,
-            },
-        };
-    }
-
-    /**
-     * Get KYC statistics
-     */
-    async getKycStatistics(): Promise<any> {
-        const byStatus = await this.kycRepository
-            .createQueryBuilder('kyc')
-            .select('kyc.status', 'status')
-            .addSelect('COUNT(kyc.id)', 'count')
-            .groupBy('kyc.status')
-            .getRawMany();
-
-        const byLevel = await this.kycRepository
-            .createQueryBuilder('kyc')
-            .select('kyc.level', 'level')
-            .addSelect('COUNT(kyc.id)', 'count')
-            .groupBy('kyc.level')
-            .getRawMany();
-
-        return {
-            byStatus,
-            byLevel,
-        };
-    }
-
-    /**
-     * Get AML alerts statistics
-     */
-    async getAmlAlertsStatistics(): Promise<any> {
-        const bySeverity = await this.amlAlertRepository
-            .createQueryBuilder('alert')
-            .select('alert.severity', 'severity')
-            .addSelect('COUNT(alert.id)', 'count')
-            .groupBy('alert.severity')
-            .getRawMany();
-
-        const byStatus = await this.amlAlertRepository
-            .createQueryBuilder('alert')
-            .select('alert.status', 'status')
-            .addSelect('COUNT(alert.id)', 'count')
-            .groupBy('alert.status')
-            .getRawMany();
-
-        const byType = await this.amlAlertRepository
-            .createQueryBuilder('alert')
-            .select('alert.type', 'type')
-            .addSelect('COUNT(alert.id)', 'count')
-            .groupBy('alert.type')
-            .getRawMany();
-
-        return {
-            bySeverity,
-            byStatus,
-            byType,
-        };
-    }
-
-    /**
-     * Get sanctions statistics
-     */
-    async getSanctionsStatistics(): Promise<any> {
-        const byStatus = await this.sanctionScreeningRepository
-            .createQueryBuilder('screening')
-            .select('screening.status', 'status')
-            .addSelect('COUNT(screening.id)', 'count')
-            .groupBy('screening.status')
-            .getRawMany();
-
-        const byMatchStatus = await this.sanctionScreeningRepository
-            .createQueryBuilder('screening')
-            .select('screening.matchStatus', 'matchStatus')
-            .addSelect('COUNT(screening.id)', 'count')
-            .groupBy('screening.matchStatus')
-            .getRawMany();
-
-        return {
-            byStatus,
-            byMatchStatus,
-        };
-    }
-
-    /**
-     * Generate daily compliance report
-     */
-    async generateDailyReport(): Promise<any> {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-
-        const [
-            kycSubmitted,
-            checksCompleted,
-            alertsGenerated,
-        ] = await Promise.all([
-            this.kycRepository.count({
-                where: {
-                    submittedAt: Between(today, tomorrow),
-                },
-            }),
-            this.complianceCheckRepository.count({
-                where: {
-                    completedAt: Between(today, tomorrow),
-                },
-            }),
-            this.amlAlertRepository.count({
-                where: {
-                    createdAt: Between(today, tomorrow),
-                },
-            }),
-        ]);
-
-        return {
-            date: today,
-            summary: {
-                kycSubmitted,
-                checksCompleted,
-                alertsGenerated,
-            },
-            statistics: await this.getComplianceStatistics(),
-        };
-    }
-
-    /**
-     * Generate weekly compliance report
-     */
-    async generateWeeklyReport(): Promise<any> {
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 7);
-
-        return {
-            period: { startDate, endDate },
-            statistics: await this.getComplianceStatistics(),
-            kycStatistics: await this.getKycStatistics(),
-            alertsStatistics: await this.getAmlAlertsStatistics(),
-        };
-    }
-
-    /**
-     * Generate monthly compliance report
-     */
-    async generateMonthlyReport(): Promise<any> {
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setMonth(startDate.getMonth() - 1);
-
-        return {
-            period: { startDate, endDate },
-            statistics: await this.getComplianceStatistics(),
-            kycStatistics: await this.getKycStatistics(),
-            alertsStatistics: await this.getAmlAlertsStatistics(),
-            sanctionsStatistics: await this.getSanctionsStatistics(),
-        };
-    }
-
-    // ============ DASHBOARD METHODS ============
-
-    /**
-     * Get compliance dashboard summary
-     */
-    async getDashboardSummary(): Promise<any> {
-        const [
-            pendingKyc,
-            pendingAlerts,
-            pendingReviews,
-            recentActivity,
-        ] = await Promise.all([
-            this.getPendingKycCount(),
-            this.getPendingAlertsCount(),
-            this.complianceCheckRepository.count({
-                where: { isManualReviewRequired: true },
-            }),
-            this.getRecentActivity(10),
-        ]);
-
-        return {
-            pendingItems: {
-                kyc: pendingKyc,
-                alerts: pendingAlerts,
-                reviews: pendingReviews,
-            },
-            recentActivity,
-            statistics: await this.getComplianceStatistics(),
-        };
-    }
-
-    /**
-     * Get recent compliance activity
-     */
-    async getRecentActivity(limit: number = 10): Promise<any[]> {
-        const activities: any[] = [];
-
-        // Get recent KYC submissions
-        const recentKyc = await this.kycRepository.find({
-            where: { submittedAt: Between(new Date(0), new Date()) },
-            relations: ['user'],
-            order: { submittedAt: 'DESC' },
-            take: limit,
-        });
-
-        recentKyc.forEach(kyc => {
-            activities.push({
-                id: kyc.id,
-                type: 'kyc_submitted',
-                userId: kyc.userId,
-                userName: kyc.user ? `${kyc.user.firstName} ${kyc.user.lastName}` : null,
-                timestamp: kyc.submittedAt,
-                details: `KYC submitted for verification`,
-            });
-        });
-
-        // Get recent compliance checks
-        const recentChecks = await this.complianceCheckRepository.find({
-            where: { completedAt: Between(new Date(0), new Date()) },
-            relations: ['user'],
-            order: { completedAt: 'DESC' },
-            take: limit,
-        });
-
-        recentChecks.forEach(check => {
-            activities.push({
-                id: check.id,
-                type: 'compliance_check',
-                userId: check.userId,
-                userName: check.user ? `${check.user.firstName} ${check.user.lastName}` : null,
-                timestamp: check.completedAt,
-                details: `${check.type} check completed with result: ${check.result}`,
-            });
-        });
-
-        // Get recent AML alerts
-        const recentAlerts = await this.amlAlertRepository.find({
-            where: {},
-            relations: ['user'],
-            order: { createdAt: 'DESC' },
-            take: limit,
-        });
-
-        recentAlerts.forEach(alert => {
-            activities.push({
-                id: alert.id,
-                type: 'aml_alert',
-                userId: alert.userId,
-                userName: alert.user ? `${alert.user.firstName} ${alert.user.lastName}` : null,
-                timestamp: alert.createdAt,
-                details: `${alert.severity} severity alert: ${alert.title}`,
-            });
-        });
-
-        // Sort by timestamp and limit
-        return activities
-            .sort((a, b) => b.timestamp - a.timestamp)
-            .slice(0, limit);
-    }
-
-    /**
-     * Get pending items count
-     */
-    async getPendingItems(): Promise<{
-        pendingKyc: number;
-        pendingDocuments: number;
-        pendingAlerts: number;
-        pendingReviews: number;
-    }> {
-        const [
-            pendingKyc,
-            pendingDocuments,
-            pendingAlerts,
-            pendingReviews,
-        ] = await Promise.all([
-            this.getPendingKycCount(),
-            this.kycDocumentRepository.count({
-                where: { status: KycDocumentStatus.UPLOADED },
-            }),
-            this.getPendingAlertsCount(),
-            this.complianceCheckRepository.count({
-                where: { isManualReviewRequired: true },
-            }),
-        ]);
-
-        return {
-            pendingKyc,
-            pendingDocuments,
-            pendingAlerts,
-            pendingReviews,
-        };
-    }
-
-    // ============ HEALTH CHECK ============
-
-    /**
-     * Health check
-     */
-    async healthCheck(): Promise<{ status: string; timestamp: Date }> {
-        // Test database connection
-        await this.kycRepository.count({ take: 1 });
-
-        return {
-            status: 'healthy',
-            timestamp: new Date(),
-        };
-    }
+  }
 }

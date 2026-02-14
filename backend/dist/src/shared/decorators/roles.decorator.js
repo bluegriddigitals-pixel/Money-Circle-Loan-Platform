@@ -1,1 +1,23 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AuditLog = exports.AUDIT_LOG_KEY = exports.RateLimit = exports.RATE_LIMIT_KEY = exports.Skip2FA = exports.SKIP_2FA_KEY = exports.Permissions = exports.PERMISSIONS_KEY = exports.Public = exports.PUBLIC_KEY = exports.Roles = exports.ROLES_KEY = void 0;
+const common_1 = require("@nestjs/common");
+exports.ROLES_KEY = 'roles';
+const Roles = (...roles) => (0, common_1.SetMetadata)(exports.ROLES_KEY, roles);
+exports.Roles = Roles;
+exports.PUBLIC_KEY = 'isPublic';
+const Public = () => (0, common_1.SetMetadata)(exports.PUBLIC_KEY, true);
+exports.Public = Public;
+exports.PERMISSIONS_KEY = 'permissions';
+const Permissions = (...permissions) => (0, common_1.SetMetadata)(exports.PERMISSIONS_KEY, permissions);
+exports.Permissions = Permissions;
+exports.SKIP_2FA_KEY = 'skip2fa';
+const Skip2FA = () => (0, common_1.SetMetadata)(exports.SKIP_2FA_KEY, true);
+exports.Skip2FA = Skip2FA;
+exports.RATE_LIMIT_KEY = 'rateLimit';
+const RateLimit = (ttl, limit) => (0, common_1.SetMetadata)(exports.RATE_LIMIT_KEY, { ttl, limit });
+exports.RateLimit = RateLimit;
+exports.AUDIT_LOG_KEY = 'auditLog';
+const AuditLog = (options) => (0, common_1.SetMetadata)(exports.AUDIT_LOG_KEY, options);
+exports.AuditLog = AuditLog;
 //# sourceMappingURL=roles.decorator.js.map

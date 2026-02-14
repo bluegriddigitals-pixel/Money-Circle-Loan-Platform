@@ -1,9 +1,9 @@
 import { User } from "./user.entity";
 export declare enum RiskLevel {
-    LOW = "low",
-    MEDIUM = "medium",
-    HIGH = "high",
-    VERY_HIGH = "very_high"
+    LOW = "LOW",
+    MEDIUM = "MEDIUM",
+    HIGH = "HIGH",
+    CRITICAL = "CRITICAL"
 }
 export declare class UserProfile {
     id: string;
@@ -21,9 +21,21 @@ export declare class UserProfile {
     totalEarned: number;
     outstandingBalance: number;
     riskLevel: RiskLevel;
+    privacySettings: {
+        profileVisibility: string;
+        activityVisibility: string;
+        searchVisibility: boolean;
+    };
+    securitySettings: {
+        twoFactorEnabled: boolean;
+        biometricEnabled: boolean;
+        sessionTimeout: number;
+        loginAlerts: boolean;
+        unusualActivityAlerts: boolean;
+    };
+    notificationPreferences: Record<string, boolean>;
     riskScore: number;
     lastRiskAssessment: Date;
-    notificationPreferences: Record<string, boolean>;
     investmentPreferences: Record<string, any>;
     language: string;
     currency: string;
