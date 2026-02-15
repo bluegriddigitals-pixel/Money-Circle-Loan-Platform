@@ -2,18 +2,18 @@
 
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';  // Changed from next/navigation
-import { create } from 'zustand';
-import { authApi } from '../api/auth';
+import { useAuthStore } from '../store/auth.store';
+import { UserRole } from '../constants/enums';
 
 export function useAuth() {
   const navigate = useNavigate();  // Changed from router
-  const { user, isLoading, error, login, logout, checkAuth, clearError } = useAuthStore();
+  const { user, isLoading, error, login, logout, checkAuth, clearError, isAuthenticated, register } = useAuthStore();
 
   useEffect(() => {
     checkAuth();
   }, []);
 
-   const requireAuth = (allowedRoles?: string[]) => {
+  const requireAuth = (allowedRoles?: string[]) => {
     if (!isLoading && !user) {
       navigate('/auth/login');  // Changed from router.push
       return false;

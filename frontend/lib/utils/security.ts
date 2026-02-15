@@ -1,4 +1,4 @@
-import CryptoJS from 'crypto-js';
+import * as CryptoJS from 'crypto-js';
 
 // Encryption key should be stored in environment variables
 const ENCRYPTION_KEY = process.env.NEXT_PUBLIC_ENCRYPTION_KEY || 'default-key-change-in-production';
@@ -35,11 +35,11 @@ export const generateSecureToken = (length: number = 32): string => {
   let token = '';
   const randomValues = new Uint8Array(length);
   crypto.getRandomValues(randomValues);
-  
+
   for (let i = 0; i < length; i++) {
     token += chars[randomValues[i] % chars.length];
   }
-  
+
   return token;
 };
 
@@ -121,21 +121,21 @@ export const generateSecurePassword = (length: number = 12): string => {
   const lowercase = 'abcdefghijklmnopqrstuvwxyz';
   const numbers = '0123456789';
   const special = '!@#$%^&*';
-  
+
   const allChars = uppercase + lowercase + numbers + special;
   let password = '';
-  
+
   // Ensure at least one of each type
   password += uppercase[Math.floor(Math.random() * uppercase.length)];
   password += lowercase[Math.floor(Math.random() * lowercase.length)];
   password += numbers[Math.floor(Math.random() * numbers.length)];
   password += special[Math.floor(Math.random() * special.length)];
-  
+
   // Fill the rest
   for (let i = password.length; i < length; i++) {
     password += allChars[Math.floor(Math.random() * allChars.length)];
   }
-  
+
   // Shuffle the password
   return password.split('').sort(() => Math.random() - 0.5).join('');
 };
@@ -161,15 +161,15 @@ export const sanitizeInput = (input: string): string => {
 export const sanitizeHtml = (html: string): string => {
   // Remove script tags and their contents
   html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-  
+
   // Remove on* attributes
   html = html.replace(/\s+on\w+="[^"]*"/gi, '');
   html = html.replace(/\s+on\w+='[^']*'/gi, '');
   html = html.replace(/\s+on\w+=\w+/gi, '');
-  
+
   // Remove javascript: links
   html = html.replace(/javascript:/gi, '');
-  
+
   return html;
 };
 
@@ -214,7 +214,7 @@ export const parseJwt = (token: string): any => {
 export const isTokenExpired = (token: string): boolean => {
   const decoded = parseJwt(token);
   if (!decoded || !decoded.exp) return true;
-  
+
   const currentTime = Date.now() / 1000;
   return decoded.exp < currentTime;
 };
@@ -255,14 +255,14 @@ export class RateLimiter {
   check(key: string): boolean {
     const now = Date.now();
     const timestamps = this.attempts.get(key) || [];
-    
+
     // Remove old attempts
     const validTimestamps = timestamps.filter(t => now - t < this.windowMs);
-    
+
     if (validTimestamps.length >= this.maxAttempts) {
       return false;
     }
-    
+
     validTimestamps.push(now);
     this.attempts.set(key, validTimestamps);
     return true;
@@ -314,7 +314,7 @@ export const getSessionTimeout = (role?: string): number => {
     transaction_admin: 60 * 60 * 1000, // 1 hour
     system_admin: 120 * 60 * 1000, // 2 hours
   };
-  
+
   return role && timeouts[role] ? timeouts[role] : 30 * 60 * 1000;
 };
 
@@ -325,7 +325,7 @@ export const isSessionExpiring = (lastActivity: number, role?: string): boolean 
   const timeout = getSessionTimeout(role);
   const warningTime = 5 * 60 * 1000; // 5 minutes warning
   const timeElapsed = Date.now() - lastActivity;
-  
+
   return timeElapsed > (timeout - warningTime);
 };
 
@@ -363,7 +363,7 @@ export const maskData = {
   email: (email: string): string => {
     const [localPart, domain] = email.split('@');
     if (!domain) return email;
-    
+
     const maskedLocal = localPart.charAt(0) + '***' + localPart.charAt(localPart.length - 1);
     return `${maskedLocal}@${domain}`;
   },
@@ -371,7 +371,7 @@ export const maskData = {
   phone: (phone: string): string => {
     const cleaned = phone.replace(/\D/g, '');
     if (cleaned.length < 4) return phone;
-    
+
     const last4 = cleaned.slice(-4);
     return '***' + last4;
   },
@@ -411,7 +411,7 @@ export const generateDeviceFingerprint = (): string => {
     // Or use it with optional chaining:
     (navigator as any).deviceMemory || 'unknown',
   ];
-  
+
   return hashData(components.join('||'));
 };
 

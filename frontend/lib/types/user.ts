@@ -28,6 +28,9 @@ export interface User {
   lastLogin?: string;
   createdAt: string;
   updatedAt: string;
+  avatar?: string;
+  profile?: UserProfile;
+  wallet?: Wallet;
 }
 
 export interface UserProfile {
