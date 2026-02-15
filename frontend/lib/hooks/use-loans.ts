@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { loansApi } from '../api/loans';
 import { Loan, LoanApplication, LoanProduct } from '../types/loan';
 

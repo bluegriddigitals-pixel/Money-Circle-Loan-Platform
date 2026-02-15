@@ -1,4 +1,4 @@
-psql -U postgres -h localhost -d moneycircle << 'EOF'
+cat > schema.sql << 'EOF'
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
@@ -723,3 +723,6 @@ CREATE TRIGGER set_loan_number BEFORE INSERT ON loans
     FOR EACH ROW EXECUTE FUNCTION generate_loan_number();
 
 -- ==================== MIGRATION COMPLETE ====================
+EOF
+
+PGPASSWORD="MoneyCircle@1233" psql -U postgres -h localhost -d moneycircle -f schema.sql

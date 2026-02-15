@@ -13,7 +13,7 @@ interface UsePaymentsReturn {
   stats: PaymentStats | null;
   isLoading: boolean;
   error: string | null;
-  
+
   // Payment Methods
   fetchPaymentMethods: () => Promise<void>;
   addPaymentMethod: (data: Partial<PaymentMethod>) => Promise<PaymentMethod | null>;
@@ -21,35 +21,35 @@ interface UsePaymentsReturn {
   deletePaymentMethod: (id: string) => Promise<boolean>;
   setDefaultPaymentMethod: (id: string) => Promise<boolean>;
   verifyPaymentMethod: (id: string, verificationData: any) => Promise<boolean>;
-  
+
   // Deposits & Withdrawals
   createDeposit: (amount: number, paymentMethodId: string, description?: string) => Promise<any>;
   createWithdrawal: (amount: number, paymentMethodId: string, description?: string) => Promise<any>;
   cancelWithdrawal: (transactionId: string) => Promise<boolean>;
-  
+
   // Repayments
   fetchRepaymentSchedule: (loanId: string) => Promise<void>;
   makeRepayment: (loanId: string, amount: number, paymentMethodId: string, installmentNumber?: number) => Promise<any>;
   calculateEarlySettlement: (loanId: string) => Promise<any>;
   makeEarlySettlement: (loanId: string, paymentMethodId: string) => Promise<any>;
-  
+
   // Receipts & History
   fetchPaymentHistory: (params?: any) => Promise<void>;
   fetchPaymentReceipt: (transactionId: string) => Promise<PaymentReceipt | null>;
   downloadReceipt: (transactionId: string) => Promise<void>;
   downloadStatement: (startDate: string, endDate: string, format?: 'pdf' | 'csv') => Promise<void>;
-  
+
   // Stats & Validation
   fetchPaymentStats: () => Promise<void>;
   validatePaymentMethod: (paymentMethodId: string, amount: number) => Promise<any>;
-  
+
   // Utilities
   clearError: () => void;
   resetState: () => void;
 }
 
 export function usePayments(): UsePaymentsReturn {
-  const { user, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [paymentSchedule, setPaymentSchedule] = useState<PaymentSchedule | null>(null);
@@ -76,10 +76,10 @@ export function usePayments(): UsePaymentsReturn {
   // Fetch payment methods
   const fetchPaymentMethods = useCallback(async () => {
     if (!isAuthenticated) return;
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const methods = await paymentsApi.getPaymentMethods();
       setPaymentMethods(methods);
@@ -96,7 +96,7 @@ export function usePayments(): UsePaymentsReturn {
   const addPaymentMethod = useCallback(async (data: Partial<PaymentMethod>) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const newMethod = await paymentsApi.addPaymentMethod(data);
       setPaymentMethods(prev => [...prev, newMethod]);
@@ -116,7 +116,7 @@ export function usePayments(): UsePaymentsReturn {
   const updatePaymentMethod = useCallback(async (id: string, data: Partial<PaymentMethod>) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const updatedMethod = await paymentsApi.updatePaymentMethod(id, data);
       setPaymentMethods(prev => prev.map(m => m.id === id ? updatedMethod : m));
@@ -136,7 +136,7 @@ export function usePayments(): UsePaymentsReturn {
   const deletePaymentMethod = useCallback(async (id: string) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       await paymentsApi.deletePaymentMethod(id);
       setPaymentMethods(prev => prev.filter(m => m.id !== id));
@@ -156,7 +156,7 @@ export function usePayments(): UsePaymentsReturn {
   const setDefaultPaymentMethod = useCallback(async (id: string) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       await paymentsApi.setDefaultPaymentMethod(id);
       setPaymentMethods(prev => prev.map(m => ({
@@ -179,7 +179,7 @@ export function usePayments(): UsePaymentsReturn {
   const verifyPaymentMethod = useCallback(async (id: string, verificationData: any) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       await paymentsApi.verifyPaymentMethod(id, verificationData);
       await fetchPaymentMethods(); // Refresh methods
@@ -199,19 +199,19 @@ export function usePayments(): UsePaymentsReturn {
   const createDeposit = useCallback(async (amount: number, paymentMethodId: string, description?: string) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const result = await paymentsApi.createDeposit({
         amount,
         paymentMethodId,
         description,
       });
-      
+
       toast.success('Deposit initiated successfully');
-      
+
       // Refresh transactions
       await fetchPaymentHistory();
-      
+
       return result;
     } catch (err: any) {
       const errorMessage = err.response?.data?.error || 'Failed to create deposit';
@@ -227,19 +227,19 @@ export function usePayments(): UsePaymentsReturn {
   const createWithdrawal = useCallback(async (amount: number, paymentMethodId: string, description?: string) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const result = await paymentsApi.createWithdrawal({
         amount,
         paymentMethodId,
         description,
       });
-      
+
       toast.success('Withdrawal initiated successfully');
-      
+
       // Refresh transactions
       await fetchPaymentHistory();
-      
+
       return result;
     } catch (err: any) {
       const errorMessage = err.response?.data?.error || 'Failed to create withdrawal';
@@ -255,14 +255,14 @@ export function usePayments(): UsePaymentsReturn {
   const cancelWithdrawal = useCallback(async (transactionId: string) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       await paymentsApi.cancelWithdrawal(transactionId);
       toast.success('Withdrawal cancelled successfully');
-      
+
       // Refresh transactions
       await fetchPaymentHistory();
-      
+
       return true;
     } catch (err: any) {
       const errorMessage = err.response?.data?.error || 'Failed to cancel withdrawal';
@@ -278,7 +278,7 @@ export function usePayments(): UsePaymentsReturn {
   const fetchRepaymentSchedule = useCallback(async (loanId: string) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const schedule = await paymentsApi.getRepaymentSchedule(loanId);
       setPaymentSchedule(schedule);
@@ -300,7 +300,7 @@ export function usePayments(): UsePaymentsReturn {
   ) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const result = await paymentsApi.makeRepayment({
         loanId,
@@ -308,13 +308,13 @@ export function usePayments(): UsePaymentsReturn {
         paymentMethodId,
         installmentNumber,
       });
-      
+
       toast.success('Repayment successful');
-      
+
       // Refresh schedule and history
       await fetchRepaymentSchedule(loanId);
       await fetchPaymentHistory();
-      
+
       return result;
     } catch (err: any) {
       const errorMessage = err.response?.data?.error || 'Failed to make repayment';
@@ -330,7 +330,7 @@ export function usePayments(): UsePaymentsReturn {
   const calculateEarlySettlement = useCallback(async (loanId: string) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const result = await paymentsApi.calculateEarlySettlement(loanId);
       return result;
@@ -348,14 +348,14 @@ export function usePayments(): UsePaymentsReturn {
   const makeEarlySettlement = useCallback(async (loanId: string, paymentMethodId: string) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const result = await paymentsApi.makeEarlySettlement(loanId, paymentMethodId);
       toast.success('Loan settled early successfully');
-      
+
       // Refresh history
       await fetchPaymentHistory();
-      
+
       return result;
     } catch (err: any) {
       const errorMessage = err.response?.data?.error || 'Failed to settle loan early';
@@ -370,10 +370,10 @@ export function usePayments(): UsePaymentsReturn {
   // Fetch payment history
   const fetchPaymentHistory = useCallback(async (params?: any) => {
     if (!isAuthenticated) return;
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const response = await paymentsApi.getPaymentHistory(params);
       setTransactions(response.transactions);
@@ -390,7 +390,7 @@ export function usePayments(): UsePaymentsReturn {
   const fetchPaymentReceipt = useCallback(async (transactionId: string) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const receipt = await paymentsApi.getPaymentReceipt(transactionId);
       setReceipts(prev => [...prev, receipt]);
@@ -409,10 +409,10 @@ export function usePayments(): UsePaymentsReturn {
   const downloadReceipt = useCallback(async (transactionId: string) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const blob = await paymentsApi.downloadReceipt(transactionId);
-      
+
       // Create download link
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -422,7 +422,7 @@ export function usePayments(): UsePaymentsReturn {
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-      
+
       toast.success('Receipt downloaded successfully');
     } catch (err: any) {
       const errorMessage = err.response?.data?.error || 'Failed to download receipt';
@@ -441,10 +441,10 @@ export function usePayments(): UsePaymentsReturn {
   ) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const blob = await paymentsApi.generateStatement({ startDate, endDate, format });
-      
+
       // Create download link
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -454,7 +454,7 @@ export function usePayments(): UsePaymentsReturn {
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-      
+
       toast.success('Statement downloaded successfully');
     } catch (err: any) {
       const errorMessage = err.response?.data?.error || 'Failed to download statement';
@@ -468,10 +468,10 @@ export function usePayments(): UsePaymentsReturn {
   // Fetch payment stats
   const fetchPaymentStats = useCallback(async () => {
     if (!isAuthenticated) return;
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const stats = await paymentsApi.getPaymentStats();
       setStats(stats);
@@ -488,7 +488,7 @@ export function usePayments(): UsePaymentsReturn {
   const validatePaymentMethod = useCallback(async (paymentMethodId: string, amount: number) => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const result = await paymentsApi.validatePaymentMethod(paymentMethodId, amount);
       return result;
@@ -522,7 +522,7 @@ export function usePayments(): UsePaymentsReturn {
     stats,
     isLoading,
     error,
-    
+
     // Payment Methods
     fetchPaymentMethods,
     addPaymentMethod,
@@ -530,28 +530,28 @@ export function usePayments(): UsePaymentsReturn {
     deletePaymentMethod,
     setDefaultPaymentMethod,
     verifyPaymentMethod,
-    
+
     // Deposits & Withdrawals
     createDeposit,
     createWithdrawal,
     cancelWithdrawal,
-    
+
     // Repayments
     fetchRepaymentSchedule,
     makeRepayment,
     calculateEarlySettlement,
     makeEarlySettlement,
-    
+
     // Receipts & History
     fetchPaymentHistory,
     fetchPaymentReceipt,
     downloadReceipt,
     downloadStatement,
-    
+
     // Stats & Validation
     fetchPaymentStats,
     validatePaymentMethod,
-    
+
     // Utilities
     clearError,
     resetState,

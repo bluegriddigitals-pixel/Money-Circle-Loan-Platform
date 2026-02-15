@@ -275,7 +275,7 @@ export function usePortfolio(): UsePortfolioReturn {
 
     try {
       // Get investments and summary
-      const [investmentsResponse, statsResponse] = await Promise.all([
+      const [investmentsResponse] = await Promise.all([
         marketplaceApi.getMyInvestments(),
         marketplaceApi.getMarketplaceStats(),
       ]);
